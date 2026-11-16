@@ -4,7 +4,7 @@
 
 当前版本：v7。仓库：[fcg-ATK/skyfall-lab](https://github.com/fcg-ATK/skyfall-lab)。
 
-计划试玩地址：[GitHub Pages](https://fcg-atk.github.io/skyfall-lab/)。首次部署完成后才可访问。
+在线试玩：[打开崩塌实验室](https://fcg-atk.github.io/skyfall-lab/)。支持手机和电脑浏览器，首次打开需要加载模型与贴图。
 
 ## 操作
 
