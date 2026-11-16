@@ -7,7 +7,7 @@ const vm = require('node:vm');
 // Exercise app.js itself: synthetic browser events, no duplicate gesture implementation.
 const source = fs.readFileSync(path.join(__dirname, '../dist/app.js'), 'utf8');
 
-async function boot() {
+async function boot(options = {}) {
   const raf = new Map(), timers = new Map(), elements = new Map();
   let nextRaf = 0, nextTimer = 0, engine;
   class EventTarget {
@@ -55,7 +55,7 @@ async function boot() {
       this.aim = { height: 7, angle: 0 }; this.profile = { targetFps: 60 };
       this.picks = []; this.fires = []; this.steps = []; this.renders = 0; this.resizes = 0;
     }
-    async load() { this.loaded = true; }
+    async load(progress) { await options.duringLoad?.({ canvas: this.canvas, engine: this, progress }); this.loaded = true; }
     direction() {}
     setQuality(value) { this.quality = value; }
     pick(x, y) { this.picks.push([x, y]); return true; }
@@ -81,6 +81,13 @@ async function boot() {
     frame(time) { const queued = [...raf.values()]; raf.clear(); for (const callback of queued) callback(time); },
   };
 }
+
+test('GPU context loss during startup shows a retry instead of hiding the loading screen', async () => {
+  const h = await boot({ duringLoad: ({ canvas }) => canvas.dispatch('webglcontextlost') });
+  assert.equal(h.get('loading').hidden, false);
+  assert.equal(h.get('retry').hidden, false);
+  assert.match(h.get('loadingTitle').textContent, /中断/);
+});
 
 test('single-finger drag rotates horizontally and vertically without selecting a target', async () => {
   const h = await boot(), before = { ...h.engine.orbit };

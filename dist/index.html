@@ -8,7 +8,7 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <title>崩塌实验室 · 动态散架版</title>
-  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="style.css?v=8.1">
 </head>
 <body>
   <svg class="icon-definitions" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
@@ -107,7 +107,9 @@
 
     <section id="loading" class="loading-screen" role="status" aria-live="polite">
       <div class="loading-brand" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
-      <span class="eyebrow">崩塌实验室</span><h2 id="loadingTitle">正在准备实验场景</h2><p id="loadingText">首次进入需要加载模型，请稍候…</p><div class="loading-track" aria-hidden="true"><span></span></div>
+      <span class="eyebrow">崩塌实验室</span><h2 id="loadingTitle">正在准备实验场景</h2><p id="loadingText">首次进入需要加载模型，请稍候…</p><div class="loading-track measured" aria-hidden="true"><span id="loadingBar"></span></div>
+      <p id="loadingProgress" class="loading-detail">正在连接资源…</p>
+      <p id="browserHint" class="browser-hint" hidden>微信内加载慢时，可点右上角“…”选择“在浏览器打开”。</p>
       <button id="retry" class="secondary-button" type="button" hidden>重新加载</button>
       <p class="loading-footnote">横竖屏都可玩 · Android / iPhone</p>
     </section>
@@ -117,13 +119,14 @@
   <script src="three-local.js"></script>
   <script src="three-addons-local.js"></script>
   <script src="physics.js"></script>
-  <script src="environment.js"></script>
+  <script src="loading.js?v=8.1"></script>
+  <script src="environment.js?v=8.1"></script>
   <script src="structural-fragments.js"></script>
   <script src="powder.js"></script>
   <script src="impact-fx.js"></script>
   <script src="collapse-solver.js"></script>
-  <script src="engine.js"></script>
+  <script src="engine.js?v=8.1"></script>
   <script src="audio.js"></script>
-  <script src="app.js"></script>
+  <script src="app.js?v=8.1"></script>
 </body>
 </html>

@@ -108,15 +108,23 @@
       this.guideRing = new T.Mesh(new T.TorusGeometry(0.65, 0.035, 5, 40), new T.MeshBasicMaterial({ color: 0xffd58f, depthTest: false, transparent: true, opacity: 0.85 }));
       this.guideRing.renderOrder = 9; this.guide.add(this.guideRing);
     }
-    async load() {
-      const loader = new T.GLTFLoader();
-      const [gltf, response, fragmentResponse, fragmentBufferResponse] = await Promise.all([
-        loader.loadAsync('assets/mobile-building.glb'),fetch('assets/mobile-building.json'),
-        fetch('assets/pc-fragments.json'),fetch('assets/pc-fragments.bin')]);
-      if (!response.ok) throw new Error('建筑描述文件加载失败');
-      if(!fragmentResponse.ok || !fragmentBufferResponse.ok)throw new Error('建筑碎裂模型加载失败');
-      this.manifest = await response.json(); this.model = gltf.scene; this.scene.add(this.model);
-      await this.environment.ready;
+    async load(onProgress = () => {}) {
+      const assets = window.SkyfallLoading.createLoader({ onProgress });
+      this.cancelLoading = () => assets.cancel();
+      let building, manifest, fragmentDescription, fragmentBuffer;
+      try {
+        [building, manifest, fragmentDescription, fragmentBuffer] = await Promise.all([
+          assets.asset('assets/mobile-building.glb', { label: '建筑模型', rawBytes: 8096620, gzipBytes: 2726978 }),
+          assets.asset('assets/mobile-building.json', { label: '建筑结构', rawBytes: 20013, gzipBytes: 2413 }),
+          assets.asset('assets/pc-fragments.json', { label: '碎块结构', rawBytes: 1229792, gzipBytes: 185008 }),
+          assets.asset('assets/pc-fragments.bin', { label: '破碎细节', rawBytes: 22719180, gzipBytes: 5409197 })
+        ]);
+      } catch (error) { assets.cancel(); throw error; }
+      onProgress({ stage: '正在解码建筑与材质…' });
+      const gltf = await window.SkyfallLoading.withTimeout(new T.GLTFLoader().parseAsync(building, 'assets/'), 45000, '建筑解码');
+      this.manifest = JSON.parse(new TextDecoder().decode(manifest)); this.model = gltf.scene; this.scene.add(this.model);
+      // Streetscape maps enhance an already complete procedural environment.
+      // Their network/GPU processing must never gate entry into the game.
       this.model.traverse(n => {
         if (!n.isMesh) return;
         const glass = /glass/i.test(n.name) || /glass/i.test(n.material?.name || '');
@@ -134,7 +142,9 @@
         const part = { ...data, id, node, center: data.center || data.position, rest: node.position.clone(), restQ: node.quaternion.clone(), restScale: node.scale.clone(), vel: new T.Vector3(), spin: new T.Vector3() };
         node.traverse(n => { n.userData.part = part; }); return part;
       });
-      this.structuralFragments.prepare(this.parts,await fragmentResponse.json(),await fragmentBufferResponse.arrayBuffer());
+      onProgress({ stage: '正在准备建筑碎裂与碰撞…' });
+      await new Promise(resolve => setTimeout(resolve, 0));
+      this.structuralFragments.prepare(this.parts, JSON.parse(new TextDecoder().decode(fragmentDescription)), fragmentBuffer);
       this.collapse=window.SkyfallCollapse.create(this.parts,{
         floorHeights:this.manifest.floorHeights,
         groundAt:(x,z)=>this.structuralFragments.groundHeight?.(x,z)??.24,

@@ -25,6 +25,8 @@ jobs:
         with:
           node-version: '24'
           package-manager-cache: false
+      - name: Prepare compressed assets
+        run: node tools/prepare-assets.cjs
       - name: Run checks
         run: node --test tests/*.test.cjs
       - name: Configure GitHub Pages

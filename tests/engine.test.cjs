@@ -104,7 +104,19 @@ if (fs.existsSync(path.join(root, 'environment.js')))
   vm.runInContext(fs.readFileSync(path.join(root, 'environment.js'), 'utf8'), context);
 for (const file of ['collapse-solver.js','structural-fragments.js', 'powder.js', 'impact-fx.js']) if (fs.existsSync(path.join(root, file)))
   vm.runInContext(fs.readFileSync(path.join(root, file), 'utf8'), context);
+vm.runInContext(fs.readFileSync(path.join(root, 'loading.js'), 'utf8'), context);
 vm.runInContext(fs.readFileSync(path.join(root, 'engine.js'), 'utf8'), context);
+
+test('optional streetscape images cannot keep an otherwise loaded building behind the spinner', async () => {
+  const game = new context.SkyfallEngine(makeCanvas());
+  game.environment.ready = new Promise(() => {});
+  let timer;
+  try {
+    await Promise.race([game.load(), new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('optional images blocked startup')), 2000); })]);
+    assert.equal(game.loaded, true);
+    assert.equal(game.parts.length, 48);
+  } finally { clearTimeout(timer); }
+});
 
 async function engine() {
   const events = [];

@@ -9,6 +9,33 @@
   let prev = 0, elapsed = 0, lastHud = 0, toastTimer, frameId, badFrames = 0, autoQuality = true;
   let restoredFocus, resultShown = false;
   const pointers = new Map(); let gesture, single;
+  const canvas = $('world'), downloads = new Map();
+  let startupFailed = false, startupTimer;
+  const inWeChat = typeof navigator !== 'undefined' && /MicroMessenger/i.test(navigator.userAgent || '');
+  $('browserHint').hidden = !inWeChat;
+  function loadingFailure(error, title = '场景加载遇到了问题') {
+    startupFailed = true; paused = true; clearTimeout(startupTimer); engine?.cancelLoading?.();
+    $('loading').hidden = false; $('loadingTitle').textContent = title;
+    $('loadingText').textContent = location.protocol === 'file:' ? '请通过试玩网址打开，不能直接双击 HTML 文件。' : (error.message || '加载未完成，请重新加载。');
+    $('loadingProgress').textContent = inWeChat ? '也可点微信右上角“…”→“在浏览器打开”再试。' : '可切换网络后重试，或使用新版系统浏览器。';
+    $('retry').hidden = false; $('retry').onclick = () => location.reload();
+    syncAudioPause();
+  }
+  // Install before WebGL construction and all asset work, not after loading.
+  canvas.addEventListener('webglcontextlost', e => {
+    e.preventDefault(); loadingFailure(new Error('手机图形资源暂时不足，请关闭其他大型页面后重新加载。'), '画面暂时中断');
+  });
+  function loadingProgress(value) {
+    if (startupFailed) return;
+    if (value.stage) { $('loadingText').textContent = value.stage; return; }
+    downloads.set(value.label, value);
+    let loaded = 0, total = 0;
+    for (const resource of downloads.values()) { loaded += resource.loaded; total += resource.total || 0; }
+    $('loadingText').textContent = '正在下载' + value.label + '…';
+    $('loadingProgress').textContent = '已下载 ' + (loaded / 1048576).toFixed(1) + ' / ' + (total / 1048576).toFixed(1) + ' MB';
+    const ratio = total ? Math.min(.95, loaded / total * .95) : 0;
+    $('loadingBar').style.width = Math.round(ratio * 100) + '%';
+  }
   try { best = Number(localStorage.getItem('skyfall-mobile-best')) || 0; quality = localStorage.getItem('skyfall-mobile-quality') || 'balanced'; } catch {}
   if (!Object.hasOwn(qualityNames, quality)) quality = 'balanced';
   $('best').textContent = best.toLocaleString();
@@ -81,14 +108,14 @@
   try {
     engine = new SkyfallEngine($('world'), onEvent);
     chooseQuality(quality, true); $('loadingText').textContent = '正在载入建筑与街区…';
-    await engine.load(); $('loading').hidden = true; updateHud(); syncAim();
+    const deadline = new Promise((_, reject) => { startupTimer = setTimeout(() => reject(new Error('场景准备超时，请重新加载或换系统浏览器打开。')), 180000); });
+    await Promise.race([engine.load(loadingProgress), deadline]); clearTimeout(startupTimer);
+    if (startupFailed) return;
+    $('loading').hidden = true; updateHud(); syncAim();
   } catch (error) {
     console.error(error);
-    $('loadingTitle').textContent = '场景加载遇到了问题';
-    $('loadingText').textContent = location.protocol === 'file:' ? '请通过试玩网址打开，或在 GitHub Pages 发布后打开，不能直接双击 HTML 文件。' : '请检查网络，用系统 Safari 或新版 Chrome 打开后重试。' + (error.message ? '（' + error.message.slice(0, 100) + '）' : '');
-    $('retry').hidden = false; $('retry').onclick = () => location.reload(); return;
+    if (!startupFailed) loadingFailure(error); return;
   }
-  const canvas = $('world');
   function multiBaseline() {
     const [a, b] = [...pointers.values()];
     if (!a || !b) return null;
@@ -183,11 +210,6 @@
     prev = 0; elapsed = 0; pointers.clear(); single = gesture = null;
     if (document.hidden) { cancelAnimationFrame(frameId); }
     else { frameId = requestAnimationFrame(frame); }
-  });
-  canvas.addEventListener('webglcontextlost', e => {
-    e.preventDefault(); paused = true; $('loading').hidden = false; $('loadingTitle').textContent = '画面暂时中断';
-    syncAudioPause();
-    $('loadingText').textContent = '手机可能暂时缺少图形资源。关闭其他大型页面后点重新加载。'; $('retry').hidden = false; $('retry').onclick = () => location.reload();
   });
   function frame(now) {
     if (document.hidden) return;

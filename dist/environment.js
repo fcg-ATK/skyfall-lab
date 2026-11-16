@@ -5,7 +5,7 @@
   function create(scene, renderer) {
     const group = new T.Group(); group.name = 'mobile_environment_v2'; scene.add(group);
     const geometries = new Set(), materials = new Set(), textures = new Set();
-    const tasks = [], temp = new T.Object3D(); let environmentTarget = null, disposed = false, anisotropyBudget = 4;
+    const tasks = [], pendingTextures = new Set(), temp = new T.Object3D(); let environmentTarget = null, disposed = false, anisotropyBudget = 4;
     const geometry = g => { geometries.add(g); return g; };
     const material = m => { materials.add(m); return m; };
     const box = geometry(new T.BoxGeometry(1, 1, 1));
@@ -30,13 +30,32 @@
     }
     function loadTexture(url, repeats, onLoad) {
       const task = new Promise(resolve => {
-        const loader = new T.TextureLoader();
-        loader.load(url, tex => {
-          if (disposed) { tex.dispose(); resolve(false); return; }
-          tex.colorSpace = T.SRGBColorSpace; tex.wrapS = tex.wrapT = T.RepeatWrapping;
-          tex.repeat.set(repeats[0], repeats[1]); tex.anisotropy = Math.min(anisotropyBudget, renderer.capabilities?.getMaxAnisotropy?.() || 1);
-          textures.add(tex); onLoad(tex); resolve(true);
-        }, undefined, () => resolve(false));
+        let settled = false;
+        const finish = success => {
+          if (settled) return;
+          settled = true; clearTimeout(timer); pendingTextures.delete(cancel); resolve(success);
+        };
+        const cancel = () => finish(false);
+        const timer = setTimeout(cancel, 12000);
+        pendingTextures.add(cancel);
+        try {
+          const loader = new T.TextureLoader();
+          loader.load(url, tex => {
+            if (settled || disposed) { tex.dispose(); return; }
+            let success = false;
+            try {
+              tex.colorSpace = T.SRGBColorSpace; tex.wrapS = tex.wrapT = T.RepeatWrapping;
+              tex.repeat.set(repeats[0], repeats[1]); tex.anisotropy = Math.min(anisotropyBudget, renderer.capabilities?.getMaxAnisotropy?.() || 1);
+              onLoad(tex); textures.add(tex); success = true;
+            } catch {
+              tex.dispose();
+            } finally {
+              finish(success);
+            }
+          }, undefined, cancel);
+        } catch {
+          cancel();
+        }
       });
       tasks.push(task); return task;
     }
@@ -130,8 +149,32 @@
     scene.background = new T.Color(0xb9c5cb);
     loadTexture('assets/env-city-light.jpg', [1,1], tex => {
       tex.mapping = T.EquirectangularReflectionMapping;
-      const pmrem = new T.PMREMGenerator(renderer), next = pmrem.fromEquirectangular(tex); pmrem.dispose();
-      environmentTarget.dispose(); environmentTarget = next; scene.environment = next.texture;
+      // Own the output before GPU work starts so a failed conversion cannot
+      // leak a target allocated inside Three.js. Match the bundled r187 PMREM.
+      const size = Math.max(256, T.MathUtils.floorPowerOfTwo(tex.image.width / 4));
+      let next = new T.WebGLCubeRenderTarget(size, { minFilter: T.LinearMipmapLinearFilter,
+        generateMipmaps: false, type: T.HalfFloatType, colorSpace: T.LinearSRGBColorSpace, depthBuffer: false });
+      for (let level = size; level >= 8; level /= 2) next.texture.mipmaps.push({ width: level, height: level });
+      next.texture.name = 'PMREM'; next.texture.isPMREMTexture = true;
+      try {
+        const pmrem = new T.PMREMGenerator(renderer);
+        const target = renderer.getRenderTarget?.(), face = renderer.getActiveCubeFace?.(), mip = renderer.getActiveMipmapLevel?.();
+        const xrEnabled = renderer.xr?.enabled;
+        try { pmrem.fromEquirectangular(tex, next); } finally {
+          // CubeCamera restores these only on its normal return path.
+          try {
+            renderer.setRenderTarget?.(target, face, mip);
+          } finally {
+            if (renderer.xr) renderer.xr.enabled = xrEnabled;
+            pmrem.dispose();
+          }
+        }
+        const previous = environmentTarget;
+        scene.environment = next.texture; environmentTarget = next; next = null;
+        previous.dispose();
+      } finally {
+        next?.dispose();
+      }
     });
     function setQuality(profile) {
       const level = profile?.shadows ? 4 : 2;
@@ -141,6 +184,7 @@
     }
     function dispose() {
       if (disposed) return; disposed = true; group.removeFromParent();
+      for (const cancel of pendingTextures) cancel();
       geometries.forEach(g => g.dispose()); materials.forEach(m => m.dispose()); textures.forEach(t => t.dispose()); environmentTarget?.dispose();
     }
     let triangles = 0, drawCalls = 0;
