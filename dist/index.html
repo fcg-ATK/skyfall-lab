@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#151a1f">
+  <meta name="description" content="崩塌实验室：在手机上自由环绕建筑，选择火箭、陨石或铁球，观察每一次撞击引发的倒塌。">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <title>崩塌实验室 · 动态散架版</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <svg class="icon-definitions" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+    <symbol id="i-sound" viewBox="0 0 24 24"><path d="M4 9h4l5-4v14l-5-4H4zM17 8a6 6 0 0 1 0 8M20 5a10 10 0 0 1 0 14"/></symbol>
+    <symbol id="i-help" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M9.5 9a2.5 2.5 0 1 1 3.6 2.25c-.9.5-1.1 1-1.1 1.75M12 16h.01"/></symbol>
+    <symbol id="i-home" viewBox="0 0 24 24"><path d="m3 11 9-8 9 8M5 9v11h14V9M9 20v-7h6v7"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M5 12h14M12 5v14"/></symbol>
+    <symbol id="i-minus" viewBox="0 0 24 24"><path d="M5 12h14"/></symbol>
+    <symbol id="i-pause" viewBox="0 0 24 24"><path d="M8 5v14M16 5v14"/></symbol>
+    <symbol id="i-fullscreen" viewBox="0 0 24 24"><path d="M9 3H3v6M15 3h6v6M21 15v6h-6M9 21H3v-6"/></symbol>
+    <symbol id="i-rocket" viewBox="0 0 32 32"><path d="M13 21 11 13c4-5 9-7 15-7 0 6-2 11-7 15zM11 13l-5 2-1 7 8-1M19 21l-2 6-7 1 3-7M8 24l-3 3"/><circle cx="20" cy="12" r="2.4"/></symbol>
+    <symbol id="i-meteor" viewBox="0 0 32 32"><path d="m25 4-9 5-8 6a8 8 0 1 0 11 11l6-9 4-11-9 8M14 5l-6 6M5 6 2 9"/><path d="m13 16 4 1 3 4-2 4-5 1-4-3 1-5z"/></symbol>
+    <symbol id="i-ball" viewBox="0 0 32 32"><circle cx="16" cy="19" r="9"/><path d="M11 17a5 5 0 0 1 5-3M16 10V4M11 4h10"/></symbol>
+    <symbol id="i-reset" viewBox="0 0 24 24"><path d="M4 10a8 8 0 1 1 1 8M4 4v6h6"/></symbol>
+    <symbol id="i-aim" viewBox="0 0 24 24"><circle cx="12" cy="12" r="6"/><path d="M12 2v5M12 17v5M2 12h5M17 12h5"/></symbol>
+    <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M4 12h15m-6-6 6 6-6 6"/></symbol>
+    <symbol id="i-close" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></symbol>
+  </svg>
+
+  <main id="game" aria-label="崩塌实验室游戏">
+    <canvas id="world" aria-label="三维建筑场景。单指拖动环绕，双指缩放或移动视角，轻点建筑瞄准。"></canvas>
+    <div class="screen-shade" aria-hidden="true"></div>
+
+    <header class="topbar">
+      <div class="brand"><span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span><div><h1>崩塌实验室<span class="mobile-badge">移动版</span></h1><p>每一次撞击，都有新的可能</p></div></div>
+      <div class="top-actions">
+        <button id="qualityBtn" class="quiet-button quality" type="button" title="切换画质">画质：平衡</button>
+        <button id="sound" class="icon-button" type="button" aria-label="切换音效" aria-pressed="true" title="切换音效"><svg><use href="#i-sound"/></svg></button>
+        <button id="helpBtn" class="icon-button" type="button" aria-label="操作帮助" title="操作帮助"><svg><use href="#i-help"/></svg></button>
+      </div>
+    </header>
+
+    <section class="stats" aria-label="本轮数据">
+      <div class="stat score-stat"><span class="stat-label">本轮得分</span><strong id="score">0</strong></div>
+      <div class="stat"><span class="stat-label">破坏程度</span><strong id="damage">0%</strong></div>
+      <div class="stat best-stat"><span class="stat-label">最高纪录</span><strong id="best">0</strong></div>
+    </section>
+
+    <div class="status-wrap"><p id="status" role="status">绕楼观察，寻找你的撞击点</p></div>
+    <nav class="camera-tools" aria-label="视角与播放控制">
+      <button id="home" class="icon-button" type="button" aria-label="恢复默认视角" title="默认视角"><svg><use href="#i-home"/></svg></button>
+      <button id="zoomIn" class="icon-button" type="button" aria-label="拉近视角" title="拉近"><svg><use href="#i-plus"/></svg></button>
+      <button id="zoomOut" class="icon-button" type="button" aria-label="拉远视角" title="拉远"><svg><use href="#i-minus"/></svg></button>
+      <span class="tool-divider" aria-hidden="true"></span>
+      <button id="pauseBtn" class="icon-button" type="button" aria-label="暂停或继续" title="暂停或继续"><svg><use href="#i-pause"/></svg></button>
+      <button id="fullscreen" class="icon-button" type="button" aria-label="进入或退出全屏" title="全屏"><svg><use href="#i-fullscreen"/></svg></button>
+    </nav>
+
+    <div class="bottom-stack">
+      <section id="aimPanel" class="aim-panel glass" aria-label="精细瞄准" hidden>
+        <div class="aim-intro"><span>精细瞄准</span><small>方向随视角 · 金色箭头预览轨迹</small></div>
+        <div class="sliders">
+          <label class="slider-field" for="height"><span>撞击高度 <output id="heightValue" for="height">7.0 m</output></span><input id="height" type="range" min="1" max="30" step="0.5" value="7" aria-label="撞击高度"></label>
+          <label class="slider-field" for="angle"><span>发射倾角 <output id="angleValue" for="angle">0°</output></span><input id="angle" type="range" min="-35" max="45" step="1" value="0" aria-label="发射倾角"></label>
+        </div>
+      </section>
+
+      <section class="control-panel glass" aria-label="武器与发射控制">
+        <div class="weapon-list" role="group" aria-label="选择撞击物">
+          <button data-weapon="rocket" class="weapon" type="button" aria-pressed="true"><svg><use href="#i-rocket"/></svg><span><strong>火箭</strong><small>高速贯穿</small></span><span class="selection-dot" aria-hidden="true"></span></button>
+          <button data-weapon="meteor" class="weapon" type="button" aria-pressed="false"><svg><use href="#i-meteor"/></svg><span><strong>陨石</strong><small>炽热贯穿</small></span><span class="selection-dot" aria-hidden="true"></span></button>
+          <button data-weapon="ball" class="weapon" type="button" aria-pressed="false"><svg><use href="#i-ball"/></svg><span><strong>铁球</strong><small>重击贯穿</small></span><span class="selection-dot" aria-hidden="true"></span></button>
+        </div>
+        <div class="launch-actions">
+          <button id="aimToggle" class="secondary-button aim-button" type="button" aria-expanded="false" aria-controls="aimPanel"><svg><use href="#i-aim"/></svg><span>瞄准</span></button>
+          <button id="reset" class="secondary-button reset-button" type="button" title="恢复建筑，开始新一轮"><svg><use href="#i-reset"/></svg><span>重建</span></button>
+          <button id="fire" class="fire-button" type="button" disabled><span>准备中</span><svg><use href="#i-arrow"/></svg></button>
+        </div>
+        <p class="control-note"><span class="touch-note">单指环绕 · 双指缩放 · 轻点楼体瞄准</span><span class="desktop-note">拖动环绕 · 滚轮缩放 · 点击楼体瞄准</span></p>
+      </section>
+    </div>
+
+    <div id="toast" class="toast" role="status" hidden></div>
+
+    <section id="help" class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="helpTitle" hidden>
+      <div class="modal help-card">
+        <button id="closeHelp" class="icon-button modal-close" type="button" aria-label="关闭操作帮助"><svg><use href="#i-close"/></svg></button>
+        <span class="eyebrow">开始你的破坏实验</span><h2 id="helpTitle">换一个角度，看它倒下。</h2>
+        <ol class="help-steps">
+          <li><span class="step-number">01</span><div><h3>先观察</h3><p>单指拖动，360° 环绕建筑；双指捏合调远近，双指上下拖动升降视角。电脑可用鼠标拖动和滚轮。</p></div></li>
+          <li><span class="step-number">02</span><div><h3>再瞄准</h3><p>轻点建筑选择撞击处，绕楼改变发射方向。金色箭头指示轨迹，点「瞄准」可调高度和倾角。</p></div></li>
+          <li><span class="step-number">03</span><div><h3>发射，欣赏连锁反应</h3><p>三种撞击物都能贯穿建筑。试着击毁不同位置的支撑，观察楼体倾斜、断裂，以及碎块滚落的连锁反应。命中后短暂慢动作；你可以环绕观看，结束后欣赏废墟。</p></div></li>
+        </ol>
+        <div class="help-tip"><strong>觉得不够顺畅？</strong><span>点右上角画质，切换到「省电」。横屏可获得更宽的观察视野。</span></div>
+      </div>
+    </section>
+
+    <section id="result" class="modal-backdrop result-backdrop" role="dialog" aria-modal="true" aria-labelledby="resultTitle" hidden>
+      <div class="modal result-card">
+        <span class="eyebrow">本次实验完成</span><h2 id="resultTitle">这次的撞击，值得回味。</h2>
+        <div class="result-values"><div><span>本轮得分</span><strong id="finalScore">0</strong></div><div><span>破坏程度</span><strong id="finalDamage">0%</strong></div></div>
+        <p>换一个位置，或试试另一种撞击物。</p>
+        <div class="result-actions"><button id="inspect" class="secondary-button" type="button">欣赏废墟</button><button id="again" class="fire-button" type="button">再试一次<svg><use href="#i-arrow"/></svg></button></div>
+      </div>
+    </section>
+
+    <section id="loading" class="loading-screen" role="status" aria-live="polite">
+      <div class="loading-brand" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
+      <span class="eyebrow">崩塌实验室</span><h2 id="loadingTitle">正在准备实验场景</h2><p id="loadingText">首次进入需要加载模型，请稍候…</p><div class="loading-track" aria-hidden="true"><span></span></div>
+      <button id="retry" class="secondary-button" type="button" hidden>重新加载</button>
+      <p class="loading-footnote">横竖屏都可玩 · Android / iPhone</p>
+    </section>
+  </main>
+
+  <noscript><div class="no-script">请在浏览器中启用 JavaScript 后重新打开游戏。</div></noscript>
+  <script src="three-local.js"></script>
+  <script src="three-addons-local.js"></script>
+  <script src="physics.js"></script>
+  <script src="environment.js"></script>
+  <script src="structural-fragments.js"></script>
+  <script src="powder.js"></script>
+  <script src="impact-fx.js"></script>
+  <script src="collapse-solver.js"></script>
+  <script src="engine.js"></script>
+  <script src="audio.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
