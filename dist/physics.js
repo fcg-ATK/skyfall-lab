@@ -14,9 +14,9 @@
     high: { pixelRatio: 1.5, maxPixels: 1800000, dust: 120, fragments: 320, shadows: true, targetFps: 60 },
   };
   const WEAPONS = {
-    ball: { radius: 2.8 },
-    rocket: { radius: 6.7 },
-    meteor: { radius: 13.2 },
+    ball: { radius: 6.5 },
+    rocket: { radius: 4.2 },
+    meteor: { radius: 5.5 },
   };
 
   function qualityProfile(mode) {
@@ -48,10 +48,11 @@
     return enter;
   }
 
-  function distanceToFootprint(point, piece) {
-    const dx = Math.max(0, Math.abs(point.x - piece.center.x) - piece.halfExtents.x);
-    const dz = Math.max(0, Math.abs(point.z - piece.center.z) - piece.halfExtents.z);
-    return Math.hypot(dx, dz);
+  function distanceToSector(point, piece) {
+    // Imported mesh AABBs overlap neighbouring sectors. Their distance can be
+    // zero several cells away and is only a collision broad phase, not a blast
+    // distance. Structural damage uses sector centres on the struck storey.
+    return Math.hypot(point.x - piece.center.x, point.z - piece.center.z);
   }
 
   function collapsePlan(pieces, hitIds, weapon, random = () => 0.5) {
@@ -80,14 +81,34 @@
     };
     for (const id of hitSet) add(id, 0);
 
-    // The initial blast only reaches the actually struck storey. Higher or
-    // lower shots cannot create a failure at an unrelated base floor.
+    // Lateral blast stays on the struck storey. The precise ball has no blast,
+    // even when imported sector bounds or centres overlap.
     for (const id of hitSet) {
       const hit = unique.get(id);
       for (const piece of floorMap.get(hit.floor)) {
         if (hitSet.has(piece.id)) continue;
-        const distance = distanceToFootprint(hit.center, piece);
-        if (distance <= config.radius) add(piece.id, 0.28 + distance / 130 + sample() * 0.02);
+        const distance = distanceToSector(hit.center, piece);
+        if (config.radius > 0 && distance <= config.radius) add(piece.id, 0.28 + distance / 130 + sample() * 0.02);
+      }
+    }
+
+    // One local cutting charge follows the first real contact down its own
+    // bearing for at most two more storeys. Check every physical link and stop
+    // at the first gap; missing metadata cannot infer a shared column.
+    if (config === WEAPONS.rocket) {
+      let hit = unique.get(hitSet.values().next().value);
+      if (hit.cell != null && hit.halfExtents.y > 0) {
+        for (let depth = 1; depth <= 2; depth++) {
+          const candidates = [...unique.values()].filter(piece => {
+            if (piece.floor !== hit.floor - 1 || piece.cell !== hit.cell || piece.halfExtents.y <= 0) return false;
+            const alignment = Math.min(hit.halfExtents.x, hit.halfExtents.z, piece.halfExtents.x, piece.halfExtents.z) * 0.5;
+            const gap = hit.center.y - hit.halfExtents.y - piece.center.y - piece.halfExtents.y;
+            return distanceToSector(hit.center, piece) <= alignment && Math.abs(gap) <= 0.2;
+          }).sort((a, b) => distanceToSector(hit.center, a) - distanceToSector(hit.center, b));
+          if (!candidates.length) break;
+          hit = candidates[0];
+          add(hit.id, 0.16 * depth);
+        }
       }
     }
 

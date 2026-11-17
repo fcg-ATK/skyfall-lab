@@ -7,8 +7,8 @@
   <meta name="description" content="崩塌实验室：在手机上自由环绕建筑，选择火箭、陨石或铁球，观察每一次撞击引发的倒塌。">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-  <title>崩塌实验室 · 动态散架版</title>
-  <link rel="stylesheet" href="style.css?v=8.1">
+  <title>崩塌实验室 · v8.7 承重连锁版</title>
+  <link rel="stylesheet" href="style.css?v=8.7-local">
 </head>
 <body>
   <svg class="icon-definitions" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
@@ -33,7 +33,7 @@
     <div class="screen-shade" aria-hidden="true"></div>
 
     <header class="topbar">
-      <div class="brand"><span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span><div><h1>崩塌实验室<span class="mobile-badge">移动版</span></h1><p>每一次撞击，都有新的可能</p></div></div>
+      <div class="brand"><span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span><div><h1>崩塌实验室<span class="mobile-badge">移动版</span></h1><p>v8.7 · 承重连锁版</p></div></div>
       <div class="top-actions">
         <button id="qualityBtn" class="quiet-button quality" type="button" title="切换画质">画质：平衡</button>
         <button id="sound" class="icon-button" type="button" aria-label="切换音效" aria-pressed="true" title="切换音效"><svg><use href="#i-sound"/></svg></button>
@@ -44,10 +44,12 @@
     <section class="stats" aria-label="本轮数据">
       <div class="stat score-stat"><span class="stat-label">本轮得分</span><strong id="score">0</strong></div>
       <div class="stat"><span class="stat-label">破坏程度</span><strong id="damage">0%</strong></div>
+      <div class="stat ammo-stat"><span class="stat-label">剩余弹药</span><strong id="ammo">4 / 4</strong></div>
       <div class="stat best-stat"><span class="stat-label">最高纪录</span><strong id="best">0</strong></div>
     </section>
 
-    <div class="status-wrap"><p id="status" role="status">绕楼观察，寻找你的撞击点</p></div>
+    <div class="status-wrap"><p id="status" role="status">4发弹药 · 绕楼寻找撞击点</p></div>
+    <aside id="supportGuide" class="support-guide" aria-label="所选楼体承重提示" hidden><p id="supportHint" role="status"></p><small id="supportLegend">青色仍在承重 · 橙色承重吃紧</small></aside>
     <nav class="camera-tools" aria-label="视角与播放控制">
       <button id="home" class="icon-button" type="button" aria-label="恢复默认视角" title="默认视角"><svg><use href="#i-home"/></svg></button>
       <button id="zoomIn" class="icon-button" type="button" aria-label="拉近视角" title="拉近"><svg><use href="#i-plus"/></svg></button>
@@ -60,17 +62,19 @@
     <div class="bottom-stack">
       <section id="aimPanel" class="aim-panel glass" aria-label="精细瞄准" hidden>
         <div class="aim-intro"><span>精细瞄准</span><small>方向随视角 · 金色箭头预览轨迹</small></div>
+        <div class="aim-assist"><button id="autoAimToggle" class="assist-toggle" type="button" aria-pressed="false" aria-describedby="autoAimHint">辅助瞄准：关</button><small id="autoAimHint">开启后，可辅助选择附近楼体</small></div>
+        <div class="aim-assist"><button id="supportGuideToggle" class="assist-toggle support-toggle" type="button" aria-pressed="true" aria-describedby="supportGuideHint">承重提示：开</button><small id="supportGuideHint">查看选中楼体的支撑与薄弱处</small></div>
         <div class="sliders">
-          <label class="slider-field" for="height"><span>撞击高度 <output id="heightValue" for="height">7.0 m</output></span><input id="height" type="range" min="1" max="30" step="0.5" value="7" aria-label="撞击高度"></label>
+          <label class="slider-field" for="height"><span>撞击高度 <output id="heightValue" for="height">10.0 m</output></span><input id="height" type="range" min="1" max="24" step="0.5" value="10" aria-label="撞击高度"></label>
           <label class="slider-field" for="angle"><span>发射倾角 <output id="angleValue" for="angle">0°</output></span><input id="angle" type="range" min="-35" max="45" step="1" value="0" aria-label="发射倾角"></label>
         </div>
       </section>
 
       <section class="control-panel glass" aria-label="武器与发射控制">
         <div class="weapon-list" role="group" aria-label="选择撞击物">
-          <button data-weapon="rocket" class="weapon" type="button" aria-pressed="true"><svg><use href="#i-rocket"/></svg><span><strong>火箭</strong><small>高速贯穿</small></span><span class="selection-dot" aria-hidden="true"></span></button>
-          <button data-weapon="meteor" class="weapon" type="button" aria-pressed="false"><svg><use href="#i-meteor"/></svg><span><strong>陨石</strong><small>炽热贯穿</small></span><span class="selection-dot" aria-hidden="true"></span></button>
-          <button data-weapon="ball" class="weapon" type="button" aria-pressed="false"><svg><use href="#i-ball"/></svg><span><strong>铁球</strong><small>重击贯穿</small></span><span class="selection-dot" aria-hidden="true"></span></button>
+          <button data-weapon="rocket" class="weapon" type="button" aria-pressed="true"><svg><use href="#i-rocket"/></svg><span><strong>火箭</strong><small>沿列下切</small></span><span class="selection-dot" aria-hidden="true"></span></button>
+          <button data-weapon="meteor" class="weapon" type="button" aria-pressed="false"><svg><use href="#i-meteor"/></svg><span><strong>陨石</strong><small>大范围冲击</small></span><span class="selection-dot" aria-hidden="true"></span></button>
+          <button data-weapon="ball" class="weapon" type="button" aria-pressed="false"><svg><use href="#i-ball"/></svg><span><strong>铁球</strong><small>精准断柱</small></span><span class="selection-dot" aria-hidden="true"></span></button>
         </div>
         <div class="launch-actions">
           <button id="aimToggle" class="secondary-button aim-button" type="button" aria-expanded="false" aria-controls="aimPanel"><svg><use href="#i-aim"/></svg><span>瞄准</span></button>
@@ -81,6 +85,11 @@
       </section>
     </div>
 
+    <aside id="debugPanel" class="debug-panel" aria-label="本地调试数据" hidden>
+      <div class="debug-heading"><span id="debugSummary">FPS 0 · Draw 0</span><button id="debugToggle" type="button" aria-expanded="false" aria-controls="debugDetails">展开</button></div>
+      <pre id="debugDetails" hidden></pre>
+    </aside>
+
     <div id="toast" class="toast" role="status" hidden></div>
 
     <section id="help" class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="helpTitle" hidden>
@@ -89,19 +98,21 @@
         <span class="eyebrow">开始你的破坏实验</span><h2 id="helpTitle">换一个角度，看它倒下。</h2>
         <ol class="help-steps">
           <li><span class="step-number">01</span><div><h3>先观察</h3><p>单指拖动，360° 环绕建筑；双指捏合调远近，双指上下拖动升降视角。电脑可用鼠标拖动和滚轮。</p></div></li>
-          <li><span class="step-number">02</span><div><h3>再瞄准</h3><p>轻点建筑选择撞击处，绕楼改变发射方向。金色箭头指示轨迹，点「瞄准」可调高度和倾角。</p></div></li>
-          <li><span class="step-number">03</span><div><h3>发射，欣赏连锁反应</h3><p>三种撞击物都能贯穿建筑。试着击毁不同位置的支撑，观察楼体倾斜、断裂，以及碎块滚落的连锁反应。命中后短暂慢动作；你可以环绕观看，结束后欣赏废墟。</p></div></li>
+          <li><span class="step-number">02</span><div><h3>再瞄准</h3><p>轻点建筑选择撞击处，绕楼改变发射方向。金色箭头指示轨迹，点「瞄准」可调高度和倾角，高度滑杆范围随残存楼体变化。默认保留你的手动瞄准点。点到空处会立即提示，瞄准圈变灰，发射按钮显示「重新瞄准」且不消耗弹药；需要重新瞄准时，仍可打的楼体会显示暖色提示，直接点选即可。可在「瞄准」面板开启「辅助瞄准」，帮助选择点击附近的有效楼体；默认关闭，也不会吸附到背景建筑或废墟。</p><p class="support-help">「承重提示」默认开启：点选楼体后，青色标记仍在承重的结构，橙色标记承重吃紧的位置。提示会说明下方支撑或上方承托关系；可在「瞄准」面板单独关闭。它反映当前简化结构状态，不保证一次命中就能全楼倒塌。</p></div></li>
+          <li><span class="step-number">03</span><div><h3>发射，再补上一击</h3><p>每轮4发弹药。倒塌稳定后会自动准备下一发，保留破坏与得分，可换武器、重新瞄准后直接发射。全毁或弹药用尽时结算；点「重建」开始新一轮。每破坏一块得100分，全毁时每剩1发额外奖励300分。全毁获S级，拆除80%以上获A级、60%以上获B级，其余为C级。</p><p class="weapon-help">火箭：瞄准中下部承重列，含命中层最多连续切入三层，遇空隙停止。<br>陨石：范围冲击，适合先打低层成片承重。<br>铁球：集中撞击承重结构，可从不同方向补刀。</p></div></li>
         </ol>
-        <div class="help-tip"><strong>觉得不够顺畅？</strong><span>点右上角画质，切换到「省电」。横屏可获得更宽的观察视野。</span></div>
+        <div class="help-tip"><strong>觉得不够顺畅？</strong><span>点右上角画质，手动切换「平衡／省电／精细」，选择会自动保存。横屏可获得更宽的观察视野。</span></div>
       </div>
     </section>
 
     <section id="result" class="modal-backdrop result-backdrop" role="dialog" aria-modal="true" aria-labelledby="resultTitle" hidden>
       <div class="modal result-card">
-        <span class="eyebrow">本次实验完成</span><h2 id="resultTitle">这次的撞击，值得回味。</h2>
+        <div class="result-heading"><span class="eyebrow">本轮挑战结束</span><span class="result-grade"><span>评级</span><strong id="finalGrade">—</strong></span></div><h2 id="resultTitle">这次的撞击，值得回味。</h2>
         <div class="result-values"><div><span>本轮得分</span><strong id="finalScore">0</strong></div><div><span>破坏程度</span><strong id="finalDamage">0%</strong></div></div>
-        <p>换一个位置，或试试另一种撞击物。</p>
-        <div class="result-actions"><button id="inspect" class="secondary-button" type="button">欣赏废墟</button><button id="again" class="fire-button" type="button">再试一次<svg><use href="#i-arrow"/></svg></button></div>
+        <p>已使用 <strong id="finalShots">0</strong> 发弹药</p>
+        <p id="ammoBonusRow" hidden>剩余弹药奖励 <strong id="finalBonus">0</strong> 分</p>
+        <p id="resultHint">重建建筑，开始下一轮拆除挑战。</p>
+        <div class="result-actions"><button id="again" class="fire-button" type="button">重建建筑<svg><use href="#i-arrow"/></svg></button></div>
       </div>
     </section>
 
@@ -118,15 +129,16 @@
   <noscript><div class="no-script">请在浏览器中启用 JavaScript 后重新打开游戏。</div></noscript>
   <script src="three-local.js"></script>
   <script src="three-addons-local.js"></script>
-  <script src="physics.js"></script>
-  <script src="loading.js?v=8.1"></script>
-  <script src="environment.js?v=8.1"></script>
-  <script src="structural-fragments.js"></script>
+  <script src="physics.js?v=8.7-local"></script>
+  <script src="loading.js?v=8.7-local"></script>
+  <script src="environment.js?v=8.7-local"></script>
+  <script src="structural-fragments.js?v=8.7-local"></script>
   <script src="powder.js"></script>
   <script src="impact-fx.js"></script>
-  <script src="collapse-solver.js"></script>
-  <script src="engine.js?v=8.1"></script>
+  <script src="collapse-solver.js?v=8.7-local"></script>
+  <script src="target-highlight.js?v=8.7-local"></script>
+  <script src="engine.js?v=8.7-local"></script>
   <script src="audio.js"></script>
-  <script src="app.js?v=8.1"></script>
+  <script src="app.js?v=8.7-local"></script>
 </body>
 </html>

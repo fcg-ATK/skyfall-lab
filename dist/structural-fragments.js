@@ -25,6 +25,9 @@ vec3 fragmentRotate(vec3 p, vec4 q) {
 
   function create(scene) {
     const states = [], byPart = new Map(), batches = [];
+    // Ground sleepers keep their geometry and heightfield deposit, but have
+    // no per-frame work. Support sleepers must still follow/wake with floors.
+    const moving = new Set(), restingOnSupport = new Set();
     const pile = new Float32Array(GRID * GRID), supportMap = new Map();
     const tempPosition = new T.Vector3(), tempScale = new T.Vector3();
     const tempQuaternion = new T.Quaternion(), deltaQuaternion = new T.Quaternion();
@@ -33,6 +36,7 @@ vec3 fragmentRotate(vec3 p, vec4 q) {
     let prepared = false, texture = null, transformData = null, depthMaterial = null;
     let dirty = false, triangles = 0, profile = { shadows: true, targetFps: 30 };
     let activeCount = 0, movingCount = 0, settledCount = 0, carriedCount = 0, uploads = 0;
+    let relevantMovingCount = 0, simulated = 0, supportChecks = 0;
 
     function inject(material) {
       material.onBeforeCompile = shader => {
@@ -56,6 +60,7 @@ vec3 fragmentRotate(vec3 p, vec4 q) {
     }
 
     function writePose(s) {
+      if (s.active && !s.settled) setRelevant(s, !quietGroundContact(s));
       const i = s.id * 8, p = s.position, q = s.quaternion;
       transformData[i] = p.x; transformData[i + 1] = p.y; transformData[i + 2] = p.z;
       transformData[i + 3] = s.active ? 1 : 0;
@@ -98,7 +103,7 @@ vec3 fragmentRotate(vec3 p, vec4 q) {
           // whole structural members in the support damage accumulator.
           mass: Math.min(900, 8 * data.half[0] * data.half[1] * data.half[2] * .12 * (data.kind === 'glass' ? 2500 : 1800)),
           active: false, settled: false, supportId: null, supportTop: GROUND, contacts: 0, angularTime: 0,
-          grounded: false, stableTime: 0, deposited: false, surfaceVelocity: new T.Vector3(),
+          grounded: false, stableTime: 0, deposited: false, relevant: false, surfaceVelocity: new T.Vector3(),
         };
         states.push(s);
         const key = String(part.id);
@@ -200,6 +205,7 @@ vec3 fragmentRotate(vec3 p, vec4 q) {
         if (direct) s.angular.multiplyScalar(4.5);
         else s.angular.normalize().multiplyScalar(Math.min(2, impactSpeed * .12) * (.7 + noise(s.id, 14) * .3));
         s.angular.add(angular);
+        moving.add(s);
         extent(s); writePose(s); released++;
       }
       activeCount += released; movingCount += released;
@@ -290,11 +296,40 @@ vec3 fragmentRotate(vec3 p, vec4 q) {
     }
     function wake(s) {
       s.settled = false; s.grounded = false; s.supportId = null; s.stableTime = 0;
+      restingOnSupport.delete(s); moving.add(s); setRelevant(s, true);
       movingCount++; settledCount--;
+    }
+
+    function quietGroundContact(s) {
+      // Never treat an airborne apex or motion on a structural support as a
+      // cosmetic tail. Bound both translation and rotational surface speed.
+      const radius = Math.max(s.extent.x,s.extent.y,s.extent.z);
+      return s.grounded && s.supportId == null &&
+        s.velocity.lengthSq() <= .35*.35 && s.angular.lengthSq()*radius*radius <= .25*.25;
+    }
+    function setRelevant(s, value) {
+      if (s.relevant === value) return;
+      s.relevant = value; relevantMovingCount += value ? 1 : -1;
+    }
+    function sleep(s) {
+      s.settled = true; s.velocity.copy(s.surfaceVelocity); s.angular.set(0,0,0);
+      moving.delete(s); setRelevant(s, false);
+      movingCount--; settledCount++;
+      if (s.supportId != null) restingOnSupport.add(s);
+      else if (!s.deposited) { deposit(s); s.deposited = true; }
+    }
+    function quietTail() {
+      let slept = 0;
+      for (const s of moving) {
+        if (!quietGroundContact(s)) continue;
+        sleep(s); writePose(s); slept++;
+      }
+      return slept;
     }
 
     function step(dt, supports = []) {
       const events = [];
+      simulated = supportChecks = 0;
       if (!prepared || !activeCount || !Number.isFinite(dt) || dt <= 0) return events;
       // The structural solver has already advanced supports to this frame's
       // end. Sweep their tops alongside the fragments instead of treating a
@@ -305,8 +340,8 @@ vec3 fragmentRotate(vec3 p, vec4 q) {
       // Save only raw immutable snapshots, never a recursively linked history.
       for (const support of supports) supportMap.set(support.id, support);
       carriedCount = 0;
-      for (const s of states) {
-        if (!s.active || !s.settled || s.supportId == null) continue;
+      for (const s of restingOnSupport) {
+        supportChecks++;
         const support = supportMap.get(s.supportId);
         velocityAt(support,s.position.x,s.position.z,surfaceVelocity);
         const x = s.position.x+surfaceVelocity.x*duration, z = s.position.z+surfaceVelocity.z*duration;
@@ -331,8 +366,8 @@ vec3 fragmentRotate(vec3 p, vec4 q) {
       // A bounded substep prevents fast shots crossing multiple thin floors.
       const drag = Math.exp(-.22*h), angularInterval = profile.targetFps >= 60 ? 0 : 1/30;
       for (let iteration = 0; iteration < steps; iteration++) {
-        for (const s of states) {
-          if (!s.active || s.settled) continue;
+        for (const s of moving) {
+          simulated++;
           const p = s.position, v = s.velocity;
           const oldX = p.x, oldZ = p.z, oldBottom = p.y-s.extent.y;
           s.angularTime += h;
@@ -363,9 +398,7 @@ vec3 fragmentRotate(vec3 p, vec4 q) {
                 s.surfaceVelocity.copy(surfaceVelocity);
                 s.stableTime = relative.lengthSq() < .0064 && s.angular.lengthSq() < .0324 ? s.stableTime+h : 0;
                 if (s.stableTime >= .28) {
-                  s.settled = true; v.copy(surfaceVelocity); s.angular.set(0,0,0);
-                  movingCount--; settledCount++;
-                  if (!support && !s.deposited) { deposit(s); s.deposited = true; }
+                  sleep(s);
                   if (support) {
                     const remaining = (steps-iteration-1)*h;
                     p.addScaledVector(surfaceVelocity,remaining);
@@ -436,8 +469,9 @@ vec3 fragmentRotate(vec3 p, vec4 q) {
     }
     function reset() {
       pile.fill(0); supportMap.clear(); activeCount = movingCount = settledCount = carriedCount = 0;
+      moving.clear(); restingOnSupport.clear(); relevantMovingCount = simulated = supportChecks = 0;
       for (const s of states) {
-        s.active = s.settled = false; s.supportId = null; s.contacts = 0;
+        s.active = s.settled = s.relevant = false; s.supportId = null; s.contacts = 0;
         s.position.copy(s.restCenter); s.quaternion.identity(); s.extent.copy(s.half);
         s.velocity.set(0,0,0); s.angular.set(0,0,0); s.angularTime = 0;
         s.grounded = false; s.stableTime = 0; s.deposited = false; s.surfaceVelocity.set(0,0,0);
@@ -451,6 +485,7 @@ vec3 fragmentRotate(vec3 p, vec4 q) {
     }
     function stats() {
       return { prepared, pieceCount: states.length, active: activeCount, moving: movingCount + carriedCount, settled: settledCount - carriedCount, carried: carriedCount,
+        relevantMoving: relevantMovingCount + carriedCount, simulated, supportChecks,
         maxDrawCalls: batches.length, geometries: batches.length, materials: batches.length + (depthMaterial ? 1 : 0),
         triangles, textures: texture ? 1 : 0, uploads };
     }
@@ -464,7 +499,7 @@ vec3 fragmentRotate(vec3 p, vec4 q) {
       }
       return result;
     }
-    return { prepare, release, step, render, reset, setQuality, stats, sample, groundHeight };
+    return { prepare, release, step, render, reset, setQuality, stats, sample, groundHeight, quietTail };
   }
   window.SkyfallStructuralFragments = { create };
 })();

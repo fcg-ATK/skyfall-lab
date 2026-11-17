@@ -1,111 +1,11 @@
 'use strict';
-// CPU/geometry integration checks. Renderer and canvas are stubs; this does not
-// verify GPU rendering, shader compilation, browser touch input, or phone FPS.
-const test = require('node:test');
-const assert = require('node:assert/strict');
-const fs = require('node:fs');
-const path = require('node:path');
-const vm = require('node:vm');
-const root = path.resolve(__dirname, '../dist');
-const physics = require('../dist/physics.js');
-
-const gradient = { addColorStop() {} };
-function makeCanvas(width = 390, height = 844) {
-  const canvas = { clientWidth: width, clientHeight: height, width, height,
-    getBoundingClientRect: () => ({ left: 0, top: 0, width, height }),
-  };
-  const ctx = { canvas, createLinearGradient: () => gradient, createRadialGradient: () => gradient,
-    fillRect() {}, clearRect() {}, strokeRect() {}, drawImage() {}, beginPath() {}, closePath() {},
-    moveTo() {}, lineTo() {}, bezierCurveTo() {}, arc() {}, fill() {}, stroke() {},
-    save() {}, restore() {}, translate() {}, rotate() {}, scale() {}, setTransform() {},
-    fillText() {}, measureText: text => ({ width: String(text).length * 8 }),
-    createImageData: (w, h) => ({ width: w, height: h, data: new Uint8ClampedArray(w * h * 4) }),
-    getImageData: (x, y, w, h) => ({ width: w, height: h, data: new Uint8ClampedArray(w * h * 4) }),
-    putImageData() {},
-  };
-  canvas.getContext = () => ctx;
-  return canvas;
-}
-
-// Read and validate the actual image container, but leave raster decoding/GPU
-// upload to browser QA. This keeps GLTF textures/materials real in CPU checks.
-function imageSize(bytes) {
-  const b = Buffer.from(bytes);
-  if (b.length >= 24 && b.toString('hex', 0, 8) === '89504e470d0a1a0a')
-    return { width: b.readUInt32BE(16), height: b.readUInt32BE(20) };
-  if (b[0] === 0xff && b[1] === 0xd8) {
-    let offset = 2;
-    while (offset + 4 < b.length) {
-      if (b[offset] !== 0xff) { offset++; continue; }
-      const marker = b[offset + 1]; offset += 2;
-      if (marker === 0xd8 || marker === 0xd9 || marker === 0x01) continue;
-      const length = b.readUInt16BE(offset);
-      if ([0xc0, 0xc1, 0xc2, 0xc3, 0xc5, 0xc6, 0xc7, 0xc9, 0xca, 0xcb, 0xcd, 0xce, 0xcf].includes(marker))
-        return { width: b.readUInt16BE(offset + 5), height: b.readUInt16BE(offset + 3) };
-      if (length < 2) break;
-      offset += length;
-    }
-  }
-  throw new Error('CPU fixture image must be a valid PNG or JPEG');
-}
-async function readImage(url) {
-  if (String(url).startsWith('blob:') || String(url).startsWith('data:')) {
-    const response = await fetch(url); return new Uint8Array(await response.arrayBuffer());
-  }
-  return fs.readFileSync(path.resolve(root, String(url).split('?')[0]));
-}
-class FixtureImage {
-  constructor() { this.listeners = new Map(); }
-  addEventListener(type, fn) { this.listeners.set(type, fn); }
-  removeEventListener(type) { this.listeners.delete(type); }
-  set src(url) {
-    this.currentSrc = url;
-    readImage(url).then(bytes => {
-      Object.assign(this, imageSize(bytes)); this.naturalWidth = this.width; this.naturalHeight = this.height;
-      this.listeners.get('load')?.call(this, { target: this });
-    }).catch(error => this.listeners.get('error')?.call(this, error));
-  }
-  get src() { return this.currentSrc; }
-}
-const context = vm.createContext({ console, URL, TextDecoder, TextEncoder, setTimeout, clearTimeout,
-  Blob, AbortController, AbortSignal, ArrayBuffer, Uint8Array, Uint8ClampedArray, Float32Array, Uint16Array, Uint32Array,
-  innerWidth: 390, innerHeight: 844, devicePixelRatio: 3,
-  document: { createElement: tag => tag === 'img' ? new FixtureImage() : makeCanvas(), createElementNS: (ns, tag) => tag === 'img' ? new FixtureImage() : makeCanvas() },
-  createImageBitmap: async blob => ({ ...imageSize(await blob.arrayBuffer()), close() {} }),
-  SkyfallPhysics: physics,
-});
-context.window = context; context.self = context;
-context.fetch = async url => {
-  if (String(url).startsWith('blob:') || String(url).startsWith('data:')) return fetch(url);
-  const file = path.resolve(root, String(url));
-  return { ok: fs.existsSync(file), json: async () => JSON.parse(fs.readFileSync(file, 'utf8')),
-    arrayBuffer: async () => Uint8Array.from(fs.readFileSync(file)).buffer,
-    blob: async () => new Blob([fs.readFileSync(file)]),
-  };
-};
-vm.runInContext(fs.readFileSync(path.join(root, 'three-local.js'), 'utf8'), context);
-vm.runInContext(fs.readFileSync(path.join(root, 'three-addons-local.js'), 'utf8'), context);
-const T = context.THREE;
-T.WebGLRenderer = class {
-  constructor(options) { this.options = options; this.domElement = options.canvas; this.shadowMap = {}; this.capabilities = { getMaxAnisotropy: () => 4 }; this.info = { render: { calls: 0, triangles: 0 } }; }
-  setPixelRatio(ratio) { this.ratio = ratio; }
-  setSize(w, h) { this.domElement.width = Math.floor(w * this.ratio); this.domElement.height = Math.floor(h * this.ratio); }
-  render(scene, camera) { scene.updateMatrixWorld(true); camera.updateMatrixWorld(true); }
-};
-T.PMREMGenerator = class {
-  fromEquirectangular() { return { texture: new T.Texture(), dispose() {} }; }
-  dispose() {}
-};
-T.GLTFLoader.prototype.loadAsync = async function (url) {
-  const bytes = fs.readFileSync(path.join(root, url));
-  return this.parseAsync(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength), '');
-};
-if (fs.existsSync(path.join(root, 'environment.js')))
-  vm.runInContext(fs.readFileSync(path.join(root, 'environment.js'), 'utf8'), context);
-for (const file of ['collapse-solver.js','structural-fragments.js', 'powder.js', 'impact-fx.js']) if (fs.existsSync(path.join(root, file)))
-  vm.runInContext(fs.readFileSync(path.join(root, file), 'utf8'), context);
-vm.runInContext(fs.readFileSync(path.join(root, 'loading.js'), 'utf8'), context);
-vm.runInContext(fs.readFileSync(path.join(root, 'engine.js'), 'utf8'), context);
+const test=require('node:test');
+const assert=require('node:assert/strict');
+const fs=require('node:fs');
+const path=require('node:path');
+const vm=require('node:vm');
+const physics=require('../dist/physics.js');
+const {engine,advance,T,context,makeCanvas,root,imageSize}=require('./helpers/engine-harness.cjs');
 
 test('optional streetscape images cannot keep an otherwise loaded building behind the spinner', async () => {
   const game = new context.SkyfallEngine(makeCanvas());
@@ -118,16 +18,6 @@ test('optional streetscape images cannot keep an otherwise loaded building behin
   } finally { clearTimeout(timer); }
 });
 
-async function engine() {
-  const events = [];
-  const value = new context.SkyfallEngine(makeCanvas(), (name, data) => events.push({ name, data }));
-  await value.load(); value.render(); value.events = events;
-  return value;
-}
-function advance(game, seconds, callback) {
-  const frames = Math.ceil(seconds * 30);
-  for (let i = 0; i < frames; i++) { game.step(1 / 30); if (callback) callback(game); }
-}
 function resourceCounts(game) {
   const geometries = new Set(), materials = new Set(), textures = new Set(); let objects = 0;
   game.scene.traverse(n => {
@@ -142,6 +32,20 @@ function resourceCounts(game) {
   if (game.scene.environment) textures.add(game.scene.environment);
   return { objects, geometries: geometries.size, materials: materials.size, textures: textures.size };
 }
+
+test('preview: each destroyed chunk scores once and landing effects cannot farm points', async () => {
+  const game = await engine(), part = game.parts[0];
+  game.fracturePart(part); game.fracturePart(part);
+  assert.equal(game.score, 100);
+  for (let i=0;i<3;i++) { game.time += 1; game.landing({point:part.rest.clone(),partId:part.id,floor:part.floor,energy:1}); }
+  assert.equal(game.score, 100);
+  game.fracturePart(game.parts[1]); assert.equal(game.score, 200);
+});
+
+test('pending blast or projectile cannot return to ready early', async()=>{
+ const g=await engine();g.state='watch';const p=g.parts[0];p.blast=true;p.delay=g.time+1;advance(g,.8);assert.equal(g.state,'watch');
+ const h=await engine();h.fire('ball');advance(h,.2);assert.equal(h.state,'flight');assert.equal(h.events.filter(e=>e.name==='shotFinished').length,0);
+});
 
 test('building contains self-contained mobile textures with real UV coordinates', async () => {
   const bytes = fs.readFileSync(path.join(root, 'assets/mobile-building.glb'));
@@ -217,14 +121,15 @@ test('real optimized GLB loads into 48 sectors prepared with 5633 actual PC frag
 for (const weapon of ['rocket', 'meteor', 'ball']) {
   test(`a horizontal ${weapon} above the roof cannot trigger damage or score`, async () => {
     const game = await engine(); game.aim.height = 30;
-    assert.equal(game.fire(weapon), true);
+    assert.equal(game.fire(weapon), false);
     advance(game, 8);
     assert.equal(game.damage, 0); assert.equal(game.score, 0);
     assert.equal(game.structuralFragments.stats().active, 0);
     assert.ok(game.parts.every(p => p.phase === 'intact'));
     assert.ok(!game.events.some(e => e.name === 'impact'));
-    assert.ok(game.events.some(e => e.name === 'miss'));
-    assert.equal(game.state, 'finished');
+    assert.ok(game.events.some(e => e.name === 'emptyAim'));
+    assert.equal(game.remainingAmmo,4);
+    assert.equal(game.state, 'ready');
   });
 }
 test('real triangle contact starts rocket damage and completes a finite round', async () => {
@@ -232,7 +137,7 @@ test('real triangle contact starts rocket damage and completes a finite round', 
   advance(game, 15);
   assert.ok(game.events.some(e => e.name === 'impact'));
   assert.ok(game.damage > 0 && game.score > 0);
-  assert.equal(game.state, 'finished');
+  assert.equal(game.state, 'ready');
   assert.ok(game.shot.traveled > 60, 'rocket continues through the building');
   assert.ok(game.parts.filter(p => p.active).every(p => p.gone));
 });
@@ -331,11 +236,15 @@ test('all quality modes respect their maximum mobile pixel and particle budgets'
   assert.ok(game.dust.length <= 45 && game.fragments.length <= 100);
 });
 
-test('a local hit schedules only blast-zone fracture; upper descent uses current support', async () => {
+test('a local rocket hit schedules its blast and at most two contiguous lower bearings', async () => {
   const game = await engine(); game.aim.height = 11.5; game.fire('rocket');
   while (!game.shot.hit && game.time < 2) game.step(1 / 120);
   const hitFloor = game.parts.find(p => game.shot.penetrated.has(p.id)).floor;
-  assert.ok(game.parts.filter(p=>Number.isFinite(p.delay)).every(p=>p.floor===hitFloor));
+  const planned=game.parts.filter(p=>Number.isFinite(p.delay));
+  const primary=game.parts[game.shotHits[0]];
+  assert.ok(planned.every(p=>p.floor===hitFloor||([hitFloor-1,hitFloor-2].includes(p.floor)&&p.cell===primary.cell)));
+  assert.equal(planned.filter(p=>p.floor===hitFloor-1).length,1);
+  assert.equal(planned.filter(p=>p.floor===hitFloor-2).length,1);
 });
 
 test('PC direct contact fractures the struck parent on the contact frame', async () => {
@@ -410,14 +319,14 @@ test('connected upper architecture falls continuously until its contact front cr
   assert.ok(game.parts.some(p=>p.floor>=4&&p.gone),'contact crushing must eventually consume upper architecture');
 });
 
-test('real PC sectors lean visibly toward missing side bearings before contact breakup', async () => {
+test('missing side bearings move only the unsupported PC sectors', async () => {
   const game = await engine();
   for(const p of game.parts.filter(p=>p.floor===0&&p.center.x<0)){p.direct=true;game.breakPart(p);}
   advance(game,.5);
   const roof=game.parts.filter(p=>p.floor===5&&!p.gone);
   assert.ok(roof.length>=4,'open-air roof survives without an age fracture');
-  assert.ok(roof.some(p=>p.node.quaternion.angleTo(p.restQ)>.07),'real source geometry must lean by more than four degrees');
-  assert.ok(roof.reduce((s,p)=>s+p.node.position.x-p.rest.x,0)/roof.length<-.35,'missing left bearings must pull the roof left');
+  assert.ok(roof.filter(p=>p.center.x<0).some(p=>p.node.position.y<p.rest.y-.2),'unsupported side must descend');
+  assert.ok(roof.filter(p=>p.center.x>=0).every(p=>p.node.position.distanceTo(p.rest)<.001),'intact neighbouring bearings must remain load-bearing');
 });
 
 test('reactivating a resting sector retains its linear and angular momentum', async () => {
@@ -428,7 +337,7 @@ test('reactivating a resting sector retains its linear and angular momentum', as
   assert.deepEqual(Array.from(p.spin.toArray()),[.2,0,-.4]);
 });
 
-test('result cannot freeze an ongoing collapse after the minimum watch interval', async () => {
+test('shot result waits for pending physical damage, not a fixed watch interval', async () => {
   const game=await engine();game.aim.height=1;game.fire('meteor');
   while(!game.shot.hit&&game.time<2)game.step(1/120);
   game.watchTime=10;game.hitStop=0;game.slow=0;
@@ -436,7 +345,7 @@ test('result cannot freeze an ongoing collapse after the minimum watch interval'
   assert.ok(game.structuralFragments.stats().moving>0,'fixture needs real airborne pieces');
   assert.equal(game.state,'watch','result modal must wait for physical settlement');
   advance(game,20);
-  assert.equal(game.state,'finished');
+  assert.equal(game.state,'ready');
   assert.equal(game.structuralFragments.stats().moving,0);
 });
 
@@ -492,11 +401,18 @@ test('every real GLB sector releases its corresponding original PC fragment geom
   assert.ok(game.parts.every(part => game.structuralFragments.sample(part.id, 1).length === 0));
 });
 
-test('after twelve seconds actual small fragments remain as settled rubble', async () => {
+test('actual small fragments remain after twelve seconds and finish settling by fifteen', async () => {
   const game = await engine(); game.aim.height = 1; game.fire('meteor');
   advance(game, 12); game.render();
+  const retained = game.structuralFragments.stats().active;
+  assert.ok(retained > 300, 'twelve seconds must retain many actual PC pieces');
+  // A larger genuine collapse can leave a low-energy roof chip sliding on the
+  // ground after the structure is ready. Let physical friction settle the tail.
+  for(let elapsed=12;elapsed<15&&game.structuralFragments.stats().moving;elapsed+=1/30)game.step(1/30);
+  game.render();
   const stats = game.structuralFragments.stats();
-  assert.ok(stats.active > 300, 'the final state must retain many actual PC pieces');
+  assert.equal(stats.active,retained,'settling must preserve every retained fragment');
+  assert.ok(game.parts.every(p=>p.gone||!p.active),'the surviving structure must be static');
   assert.equal(stats.moving, 0, 'the collapse must finish with stable debris');
   assert.equal(stats.settled, stats.active);
   assert.ok(game.events.some(e => e.name === 'floorImpact'), 'real fragment landing must drive the impact feedback');

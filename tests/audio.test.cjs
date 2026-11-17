@@ -199,15 +199,16 @@ async function bootApp(options = {}) {
   class SkyfallEngine {
     constructor(canvas, onEvent) {
       engine = this; this.onEvent = onEvent; this.score = this.damage = 0; this.state = 'ready';
-      this.aim = { height: 7, angle: 0 }; this.profile = { targetFps: 60 };
+      this.aim = { height: 7, angle: 0 }; this.profile = { targetFps: 60 }; this.remainingAmmo = this.maxShots = 4;
     }
     async load() { await options.duringLoad?.({ document, ...h }); this.loaded = true; }
+    aimLimits() { assert.equal(this.loaded, true); return { min: 1, max: 24 }; }
     setQuality() {}
     direction() {}
     reset() { this.onEvent('reset'); }
   }
   await vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../dist/app.js'), 'utf8'), {
-    window: h.window, document, SkyfallEngine, console, localStorage: { getItem() { return null; }, setItem() {} },
+    window: h.window, document, SkyfallEngine, console, URLSearchParams, localStorage: { getItem() { return null; }, setItem() {} },
     location: { protocol: 'http:' }, requestAnimationFrame() { return 1; }, cancelAnimationFrame() {}, setTimeout() {}, clearTimeout() {},
   }, { filename: 'app.js' });
   return { ...h, document, engine, get: id => document.getElementById(id) };

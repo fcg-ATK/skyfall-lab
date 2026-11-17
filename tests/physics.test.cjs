@@ -51,11 +51,11 @@ test('actual hits are immediate and plan IDs are unique', () => {
   assert.equal(new Set(result.map(p => p.id)).size, result.length);
   assert.ok(result.every(p => Number.isFinite(p.delay) && p.delay >= 0));
 });
-test('upper-floor damage never destroys intact lower floors', () => {
+test('upper-floor blast cannot reach unrelated lower floors', () => {
   for (const weapon of ['rocket', 'meteor', 'ball']) {
     const result = collapsePlan(building, ['f4c2'], weapon);
     assert.ok(result.length > 0);
-    assert.ok(result.every(p => building.find(b => b.id === p.id).floor >= 4));
+    assert.ok(result.every(p => building.find(b => b.id === p.id).floor >= (weapon==='rocket'?2:4)));
   }
 });
 test('a base blast plans only local struck-storey fracture, not a timed upper wave', () => {
@@ -69,13 +69,13 @@ test('a local impact tears across a storey instead of releasing it as one synchr
   const base=result.filter(p=>p.id.startsWith('f0')).map(p=>p.delay);
   assert.ok(Math.max(...base)-Math.min(...base)>.03 && Math.max(...base)<.5,'farther members must visibly follow the contact zone');
 });
-test('weapons produce distinct corner-hit collapse footprints', () => {
-  const ball = collapsePlan(building, ['f0c0'], 'ball');
-  const rocket = collapsePlan(building, ['f0c0'], 'rocket');
-  const meteor = collapsePlan(building, ['f0c0'], 'meteor');
-  assert.ok(ball.length >= 1, 'ball damages a meaningful supported column');
-  assert.ok(rocket.length > ball.length);
-  assert.ok(meteor.length > rocket.length);
+test('weapon radii resolve distinct nearby centre distances despite overlapping AABBs', () => {
+  const targets=[0,4.2,4.2001,5.5,5.5001,6.5,6.5001].map((x,id)=>({id,floor:0,center:v(x),halfExtents:v(10,1,10)}));
+  // Every AABB contains the hit centre, including members just outside each
+  // configured radius. Only centre distance may select the lateral blast.
+  for(const [weapon,expected] of Object.entries({rocket:[0,1],meteor:[0,1,2,3],ball:[0,1,2,3,4,5]})){
+    assert.deepEqual(collapsePlan(targets,[0],weapon).map(p=>p.id),expected,`${weapon}: include the exact radius and reject the next outside centre`);
+  }
 });
 test('detached remote upper pieces do not collapse through nonexistent support', () => {
   const remote = { id: 'remote', floor: 1, center: v(200, 5, 200), halfExtents: v(2, 1, 2) };

@@ -401,3 +401,89 @@ test('batched fragments retain authored UVs, texture and normalized vertex color
   assert.equal(glassBatch.material.forceSinglePass, true, 'transparent glass must remain one draw rather than separate front/back passes');
   assert.ok(manager.stats().prepared);
 });
+
+test('sleeping ground rubble leaves per-frame work while one newly released piece keeps simulating', () => {
+  const {manager,part,otherPart}=setup({count:2049,y:.49,spacing:0,splitLastPart:true});
+  manager.release(part,{energy:0});
+  for(let i=0;i<60;i++)manager.step(1/60,[]);
+  assert.equal(manager.stats().settled,2048);
+  const pile=manager.sample(17,2048),height=manager.groundHeight(0,0);
+  otherPart.node.position.y=50;
+  manager.release(otherPart,{energy:0});
+  manager.step(1/60,[]);
+  assert.equal(manager.stats().simulated,1,'only one live fragment should enter the physics substep');
+  assert.equal(manager.stats().supportChecks,0,'ground rubble needs no support polling');
+  assert.equal(manager.stats().relevantMoving,1,'an airborne piece matters even at very low initial speed');
+  assert.equal(manager.stats().active,2049);
+  assert.equal(manager.stats().pieceCount,2049);
+  assert.equal(manager.groundHeight(0,0),height);
+  assert.ok(manager.sample(17,2048).every((s,i)=>s.position.distanceTo(pile[i].position)<1e-9));
+  manager.reset();
+  manager.step(1/60,[]);
+  assert.equal(manager.stats().simulated,0);
+  assert.equal(manager.stats().relevantMoving,0);
+  assert.equal(manager.stats().supportChecks,0);
+});
+
+test('support sleepers stay tracked and rejoin live physics exactly once when the support disappears', () => {
+  const {manager,part}=setup({count:1,y:5.25});
+  const support={id:'floor',floor:1,minX:-10,maxX:10,minZ:-10,maxZ:10,top:5};
+  manager.release(part,{energy:0});
+  for(let i=0;i<90;i++)manager.step(1/60,[support]);
+  assert.equal(manager.stats().simulated,0);
+  assert.equal(manager.stats().supportChecks,1);
+  assert.equal(manager.stats().relevantMoving,0);
+  const y=manager.sample(17,1)[0].position.y;
+  manager.step(1/60,[]);
+  assert.equal(manager.stats().simulated,1);
+  assert.equal(manager.stats().moving,1);
+  assert.equal(manager.stats().relevantMoving,1);
+  assert.ok(manager.sample(17,1)[0].position.y<y);
+  manager.step(1/60,[]);
+  assert.equal(manager.stats().supportChecks,0);
+  assert.equal(manager.stats().moving,1);
+  for(let i=0;i<300;i++)manager.step(1/60,[]);
+  assert.equal(manager.stats().simulated,0);
+  assert.equal(manager.stats().moving,0);
+});
+
+test('quietTail sleeps only low-energy ground contact, retaining geometry and depositing rubble once', () => {
+  const {manager,part}=setup({count:1,y:.49});
+  manager.release(part,{energy:0,velocity:V(.2,-.2,0)});
+  manager.step(1/60,[]);
+  assert.equal(manager.stats().moving,1,'debug moving count retains the low-energy tail until it sleeps');
+  assert.equal(manager.stats().relevantMoving,0,'ground contact with tiny residual motion must not extend the round');
+  const before=manager.sample(17,1)[0];
+  assert.equal(manager.quietTail(),1);
+  assert.equal(manager.stats().moving,0);
+  assert.equal(manager.stats().settled,1);
+  assert.equal(manager.stats().active,1);
+  const height=manager.groundHeight(before.position.x,before.position.z);
+  assert.ok(height>.24);
+  assert.equal(manager.quietTail(),0);
+  for(let i=0;i<60;i++)manager.step(1/60,[]);
+  assert.equal(manager.stats().simulated,0);
+  assert.equal(manager.groundHeight(before.position.x,before.position.z),height);
+  const after=manager.sample(17,1)[0];
+  assert.ok(after.position.distanceTo(before.position)<1e-9);
+  assert.ok(after.quaternion.angleTo(before.quaternion)<1e-8);
+});
+
+test('quietTail never freezes airborne, fast sliding, fast rotating, or supported fragments', () => {
+  const airborne=setup({count:1,y:50}),sliding=setup({count:1,y:.49}),rotating=setup({count:1,y:.49}),supported=setup({count:1,y:5.25});
+  airborne.manager.release(airborne.part,{energy:0});
+  sliding.manager.release(sliding.part,{energy:0,velocity:V(4,-.2,0)});
+  rotating.manager.release(rotating.part,{energy:0,velocity:V(0,-.2,0),angularVelocity:V(0,10,0)});
+  supported.manager.release(supported.part,{energy:0,velocity:V(.2,0,0)});
+  const support={id:'floor',floor:1,minX:-10,maxX:10,minZ:-10,maxZ:10,top:5};
+  sliding.manager.step(1/60,[]);rotating.manager.step(1/60,[]);supported.manager.step(1/60,[support]);
+  for(const fixture of [airborne,sliding,rotating,supported]) {
+    assert.equal(fixture.manager.stats().relevantMoving,1);
+    assert.equal(fixture.manager.quietTail(),0);
+    assert.equal(fixture.manager.sample(17,1)[0].settled,false);
+    assert.equal(fixture.manager.stats().moving,1);
+  }
+  const before=airborne.manager.sample(17,1)[0].position.y;
+  airborne.manager.step(.1,[]);
+  assert.ok(airborne.manager.sample(17,1)[0].position.y<before);
+});

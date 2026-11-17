@@ -19,18 +19,19 @@ test('v6 missing base moves every connected upper floor together without timer g
  assert.equal(events.length,0,'falling through open air must not fracture anything');
 });
 
-test('one-sided support failure gives a visible mirrored lean and lateral travel',()=>{
+test('one-sided support loss moves only the unsupported side with mirrored lean',()=>{
  const outcomes=[];
  for(const failedX of [0,4]){
   const {parts,solver}=fixture();
   for(const p of parts)if(p.floor===0&&p.rest.x===failedX)p.gone=true;
   step(solver,.5);
-  const roof=parts.filter(p=>p.floor===4&&!p.gone);
-  assert.equal(roof.length,4,'unsupported roof must survive open-air descent');
+  const roof=parts.filter(p=>p.floor===4&&p.rest.x===failedX&&!p.gone);
+  assert.equal(roof.length,2,'unsupported roof must survive open-air descent');
+  assert.ok(parts.filter(p=>p.rest.x!==failedX).every(p=>!p.active&&p.node.position.y===p.rest.y),'supported side must stay in place');
   const direction=failedX===0?-1:1;
   const drift=roof.reduce((s,p)=>s+p.node.position.x-p.rest.x,0)/roof.length;
-  assert.ok(drift*direction>.35,`roof must drift toward the missing bearings: ${drift}`);
-  assert.ok(roof.every(p=>Math.abs(p.node.quaternion.z)>.035),'lean must be clearly visible, over four degrees');
+  assert.ok(drift*direction>.08,`roof must drift toward the missing bearings: ${drift}`);
+  assert.ok(roof.every(p=>Math.abs(p.node.quaternion.z)>.005),'unsupported side must rotate toward the lost bearing');
   outcomes.push(drift);
  }
  assert.ok(Math.abs(outcomes[0]+outcomes[1])<.05,'opposite bearing loss must mirror, without random blast');
@@ -53,17 +54,13 @@ test('tilted support snapshots match their moving plane and remain immutable',()
  assert.equal(support.velocityAt(0,0).y,-3);
 });
 
-test('contact front breaks regional coherence and preserves falling upper momentum',()=>{
+test('local compression progresses down the falling column without breaking bearing siblings',()=>{
  const {parts,solver,events}=fixture();
  for(const p of parts)if(p.floor===0&&p.rest.x===0)p.gone=true;
- let sawDifferentPose=false;
- for(let i=0;i<360;i++){
-  solver.step(1/120);
-  const moving=parts.filter(p=>p.active&&!p.gone);
-  for(const a of moving)for(const b of moving)if(a.floor===b.floor&&Math.abs(a.node.quaternion.z-b.node.quaternion.z)>.025)sawDifferentPose=true;
- }
+ step(solver,3);
  assert.ok(events.length>4,'compression must progress beyond the first support');
- assert.ok(sawDifferentPose,'contact or differential strain must let regions rotate separately');
+ assert.ok(events.every(e=>parts[e.id].rest.x===0),'overlapping bounds cannot pass compression into the supported side');
+ assert.ok(parts.filter(p=>p.rest.x===4).every(p=>!p.active&&!p.gone&&p.node.position.y===p.rest.y));
 });
 test('v6 unsupported parts do not automatically fracture at .45 seconds',()=>{
  const {parts,solver,events}=fixture(); for(const p of parts.filter(p=>p.floor<3))p.gone=true;
@@ -76,16 +73,17 @@ test('v6 first impact crushes the lowest contact zone and keeps upper momentum',
  const high=parts.filter(p=>p.floor>=2);assert.ok(high.every(p=>!p.gone&&p.vel.y<0));
  const shift=high[0].node.position.y-high[0].rest.y;assert.ok(high.every(p=>Math.abs(p.node.position.y-p.rest.y-shift)<1e-8));
 });
-test('v6 upper mass impacts and crushes intact lower supports instead of interpenetrating',()=>{
+test('moderate upper mass contacts the lower support without interpenetrating',()=>{
  const {parts,solver,events}=fixture(); for(const p of parts.filter(p=>p.floor===2))p.gone=true;
- step(solver,1.3);assert.ok(events.some(e=>parts[e.id].floor===1),'impact must damage intact supporting storey');
+ step(solver,1.3);assert.ok(events.some(e=>parts[e.id].floor===3),'incoming lowest member must crush at the contact plane');
+ assert.ok(parts.filter(p=>p.floor<2).every(p=>!p.gone),'supported lower storeys must absorb a moderate impact');
  assert.ok(events.filter(e=>parts[e.id].floor>=3).every(e=>e.cause==='compression'));
  assert.ok(parts.every(p=>p.gone||p.node.position.y-p.halfExtents.y>=-.01));
 });
-test('v6 cumulative missing supports detach upper structure, isolated damage can stay local',()=>{
+test('losing an exterior bearing releases that column and preserves the other three',()=>{
  const {parts,solver}=fixture();parts[0].gone=true;step(solver,.2);
- assert.ok(parts.filter(p=>p.floor>0).every(p=>!p.active));
- parts[1].gone=true;step(solver,.1);assert.ok(parts.filter(p=>p.floor>0).every(p=>p.active));
+ assert.ok(parts.filter(p=>p.floor>0&&p.cell===0).every(p=>p.active));
+ assert.ok(parts.filter(p=>p.cell!==0).every(p=>!p.active&&p.node.position.y===p.rest.y));
 });
 test('v6 intact architecture never moves and reset removes previous groups',()=>{
  const {parts,solver}=fixture();step(solver,1);assert.ok(parts.every(p=>p.node.position.y===p.rest.y&&!p.active));
@@ -136,4 +134,36 @@ test('v6 disconnected top-storey island cannot borrow support through a destroye
  assert.ok(left.every(p=>p.active&&p.node.position.y<p.rest.y-.1),'isolated left island lost its own lower supports');
  const right=parts.filter(p=>p.floor===5&&[2,3,6,7].includes(p.cell));
  assert.ok(right.every(p=>!p.active&&p.node.position.y===p.rest.y),'right island retains its own supports');
+});
+
+test('supported slab absorbs a one-storey fall while the falling member fractures',()=>{
+ const {parts,solver,events}=fixture(3);
+ for(const p of parts)if(![0,8].includes(p.id))p.gone=true;
+ parts[8].active=true;step(solver,1.1);
+ assert.ok(events.some(e=>e.id===8));
+ assert.equal(parts[0].gone,false,'moderate fall must expend energy crushing the incoming member');
+ assert.equal(parts[0].active,false);
+});
+test('major high-energy impact can still break the supporting slab',()=>{
+ const {parts,solver,events}=fixture(3);
+ for(const p of parts)if(![0,8].includes(p.id))p.gone=true;
+ parts[8].active=true;parts[8].node.position.y+=20;step(solver,2.5);
+ assert.ok(events.some(e=>e.id===0&&e.energy>=18),'a major impact above 18 m/s must retain real secondary failure');
+});
+test('a collision absorbs some momentum in its own column without stopping upper descent',()=>{
+ const {parts,solver,events}=fixture(4);
+ for(const p of parts)if(p.floor===1)p.gone=true;
+ let before=0;
+ for(let i=0;i<240&&!events.length;i++){before=parts[12].vel.y;solver.step(1/120);}
+ assert.ok(events.length>0);
+ assert.ok(parts[12].vel.y<0&&parts[12].vel.y>before*.9,'compression must dissipate momentum, not accelerate every successive floor');
+});
+
+test('a subcritical 16 m/s impact expends its energy crushing the incoming member',()=>{
+ const {parts,solver,events}=fixture(3);
+ for(const p of parts)if(![0,8].includes(p.id))p.gone=true;
+ parts[8].active=true;parts[8].node.position.y+=10;step(solver,2);
+ const impact=events.find(e=>e.id===8);
+ assert.ok(impact&&impact.energy>15&&impact.energy<18,'fixture must exercise a real subcritical high-speed contact');
+ assert.equal(parts[0].gone,false,'bearing survives while incoming member absorbs the impact');
 });

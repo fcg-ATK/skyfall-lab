@@ -6,13 +6,16 @@
   const qualityNames = { balanced: '平衡', low: '省电', high: '精细' };
   let engine, paused = false, weapon = 'rocket', soundOn = true, best = 0, quality = 'balanced';
   const audio = typeof window.SkyfallAudio === 'function' ? new window.SkyfallAudio() : null;
-  let prev = 0, elapsed = 0, lastHud = 0, toastTimer, frameId, badFrames = 0, autoQuality = true;
+  let prev = 0, elapsed = 0, lastHud = 0, toastTimer, frameId;
   let restoredFocus, resultShown = false;
+  const debugEnabled = new URLSearchParams(location.search).get('debug') === '1';
+  let debugFrames = 0, debugElapsed = 0, debugFps = 0;
   const pointers = new Map(); let gesture, single;
   const canvas = $('world'), downloads = new Map();
   let startupFailed = false, startupTimer;
   const inWeChat = typeof navigator !== 'undefined' && /MicroMessenger/i.test(navigator.userAgent || '');
   $('browserHint').hidden = !inWeChat;
+  $('debugPanel').hidden = !debugEnabled;
   function loadingFailure(error, title = '场景加载遇到了问题') {
     startupFailed = true; paused = true; clearTimeout(startupTimer); engine?.cancelLoading?.();
     $('loading').hidden = false; $('loadingTitle').textContent = title;
@@ -36,7 +39,7 @@
     const ratio = total ? Math.min(.95, loaded / total * .95) : 0;
     $('loadingBar').style.width = Math.round(ratio * 100) + '%';
   }
-  try { best = Number(localStorage.getItem('skyfall-mobile-best')) || 0; quality = localStorage.getItem('skyfall-mobile-quality') || 'balanced'; } catch {}
+  try { best = Number(localStorage.getItem('skyfall-mobile-best-loop-v1')) || 0; quality = localStorage.getItem('skyfall-mobile-quality') || 'balanced'; } catch {}
   if (!Object.hasOwn(qualityNames, quality)) quality = 'balanced';
   $('best').textContent = best.toLocaleString();
   function toast(message) {
@@ -56,62 +59,165 @@
   // Audio must observe visibility changes even while engine.load() is still pending.
   document.addEventListener('visibilitychange', () => audio?.setHidden(Boolean(document.hidden)));
   function modalOpen() { return !$('help').hidden || !$('result').hidden; }
-  function syncAudioPause() { audio?.setPaused(paused || modalOpen()); }
+  function syncAudioPause() {
+    const blocked = paused || modalOpen();
+    audio?.setPaused(blocked);
+    if (engine) engine.targetHighlightPaused = blocked;
+    updateSupportGuide();
+  }
   function showModal(id) {
     pointers.clear(); single = gesture = null; restoredFocus = document.activeElement;
     $(id).hidden = false; $(id === 'help' ? 'closeHelp' : 'again').focus();
-    syncAudioPause();
+    syncAudioPause(); updateDebug();
   }
-  function hideModal(id) { $(id).hidden = true; restoredFocus?.focus?.(); prev = 0; syncAudioPause(); }
+  function hideModal(id) { $(id).hidden = true; restoredFocus?.focus?.(); prev = 0; syncAudioPause(); updateDebug(); }
+  function updateDebug() {
+    $('debugPanel').hidden = !debugEnabled || modalOpen();
+    if ($('debugPanel').hidden || !engine?.loaded) return;
+    const m = engine.metrics();
+    const selected = engine.aimValid === false ? null : engine.supportInsight;
+    $('debugSummary').textContent = 'FPS ' + debugFps + ' · Draw ' + m.drawCalls;
+    const fixed = value => Number(value || 0).toFixed(2);
+    $('debugDetails').textContent = [
+      'moving ' + m.moving + ' · relevantMoving ' + m.relevantMoving,
+      'stillTime ' + fixed(m.stillTime) + 's · damageQuietTime ' + fixed(m.damageQuietTime) + 's',
+      'shots ' + m.shots + ' · remainingAmmo ' + engine.remainingAmmo,
+      'hitCount ' + (m.shotHits || []).length + ' · shotHits [' + (m.shotHits || []).join(', ') + ']',
+      'shotFractures ' + ((m.shotFractures || []).map(f => f.id + ':' + f.cause).join(', ') || '—'),
+      ...(selected ? [
+        'selected #' + selected.id + ' · state ' + selected.state + ' · anchored ' + selected.anchored,
+        'supportIds [' + (selected.supportIds || []).join(', ') + '] · carriedIds [' + (selected.carriedIds || []).join(', ') + ']',
+        'load/capacity ' + fixed(selected.load) + '/' + fixed(selected.capacity) + ' · unbracedHeight ' + fixed(selected.unbracedHeight),
+        'reason ' + selected.reason + ' · criticalReason ' + (selected.criticalReason || '—'),
+      ] : ['selected support —']),
+      'support · floor live bearing ratio reason',
+      ...(m.support || []).map(s => s.floor + 'F · ' + s.live + ' · ' + s.bearing + ' · ' + fixed(s.ratio) + ' · ' + s.reason + ' · bridged [' + (s.bridged || []).join(', ') + ']'
+        + (s.overloaded ? ' · overloaded [' + s.overloaded.join(', ') + ']' : '')
+        + (s.failures ? ' · failures [' + s.failures.map(f => f.id + ':' + f.reason).join(', ') + ']' : '')),
+    ].join('\n');
+  }
   function updateHud() {
     if (!engine) return;
     $('score').textContent = engine.score.toLocaleString(); $('damage').textContent = engine.damage + '%';
-    const ready = engine.state === 'ready', finished = engine.state === 'finished';
-    $('fire').disabled = !engine.loaded || (!ready && !finished);
-    $('fire').innerHTML = '<span>' + (ready ? '发射' : finished ? '再试一次' : '观察倒塌') + '</span><svg><use href="#i-arrow"/></svg>';
+    $('ammo').textContent = engine.remainingAmmo + ' / ' + engine.maxShots;
+    const ready = engine.state === 'ready' && !engine.aimTween, finished = engine.state === 'finished';
+    const emptyTarget = ready && engine.aimValid === false;
+    $('fire').disabled = !engine.loaded || emptyTarget || (!ready && !finished);
+    $('fire').setAttribute('data-aim-empty', String(emptyTarget));
+    $('fire').innerHTML = '<span>' + (ready ? emptyTarget ? '重新瞄准' : '发射' : finished ? '重建' : engine.aimTween ? '调整瞄准' : '观察倒塌') + '</span><svg><use href="#i-arrow"/></svg>';
     document.querySelectorAll('[data-weapon]').forEach(b => { b.disabled = !ready; });
     $('height').disabled = $('angle').disabled = !ready;
+    $('autoAimToggle').disabled = engine.state !== 'ready';
+    $('supportGuideToggle').disabled = engine.state !== 'ready';
+    updateSupportGuide();
+    updateDebug();
+  }
+  function updateSupportGuide() {
+    const visible = Boolean(engine?.loaded && engine.supportGuideEnabled && engine.state === 'ready' && !engine.aimTween && !paused && !modalOpen());
+    $('supportGuide').hidden = !visible;
+    $('game').setAttribute('data-support-visible', String(visible));
+    if (!visible) return;
+    const insight = engine.supportInsight;
+    let message = '点选楼体，查看承重关系';
+    if (engine.aimValid === false) message = '点选残楼，查看它由哪里支撑';
+    else if (insight?.criticalReason === 'unbraced load exceeds capacity') message = '侧向支撑不足，此处承重已超限';
+    else if (insight?.criticalReason) message = '此处承重吃紧，失效可能引发连锁坍塌';
+    else if (insight?.supportIds?.length && insight?.carriedIds?.length) message = '下方' + insight.supportIds.length + '处支撑 · 承托上方' + insight.carriedIds.length + '片楼体';
+    else if (insight?.supportIds?.length) message = '下方' + insight.supportIds.length + '处结构仍在支撑';
+    else if (insight?.carriedIds?.length) message = '这里承托着上方' + insight.carriedIds.length + '片楼体';
+    else if (insight?.anchored) message = '此处直接落地承重';
+    $('supportHint').textContent = message;
+    $('supportGuide').setAttribute('data-critical', String(Boolean(engine.aimValid && insight?.criticalReason)));
+  }
+  function syncSupportGuide() {
+    $('supportGuideToggle').setAttribute('aria-pressed', String(engine.supportGuideEnabled));
+    $('supportGuideToggle').textContent = '承重提示：' + (engine.supportGuideEnabled ? '开' : '关');
   }
   function onEvent(name, data) {
     audio?.play(name, data);
     if (name === 'launch') { $('status').textContent = '已发射 · 拖动视角观察'; $('aimPanel').hidden = true; $('aimToggle').setAttribute('aria-expanded', 'false'); }
     if (name === 'impact') $('status').textContent = '命中！观察失稳与连锁坍塌';
     if (name === 'miss') $('status').textContent = '这次没有命中 · 调低高度或换个方向';
+    if (name === 'emptyAim') { toast('这里已经空了，换个位置试试'); $('status').textContent = '重新瞄准 · 暖色楼体仍可打'; }
+    if (name === 'aimEmpty') {
+      toast('点在空处了，点楼体'); $('status').textContent = '重新瞄准 · 暖色楼体仍可打'; syncAim();
+    }
+    if (name === 'aimSelected') {
+      clearTimeout(toastTimer); $('toast').hidden = true;
+      $('status').textContent = data?.assisted ? '已辅助瞄准附近楼体 · 可发射' : '已瞄准楼体 · 可发射'; syncAim();
+    }
+    if (name === 'shotFinished') {
+      $('status').textContent = '本发拆除' + data.shotDamage + '% · 累计' + data.damage + '% · 已用' + data.shots + '发';
+      syncAim(); engine.refreshAimValidity?.();
+      if (engine.aimValid === false && !engine.aimTween) $('status').textContent += ' · 暖色楼体仍可打';
+    }
     if (name === 'finished' && !resultShown) {
       resultShown = true; $('finalScore').textContent = data.score.toLocaleString(); $('finalDamage').textContent = data.damage + '%';
+      const grade = data.cleared && data.damage === 100 ? 'S' : data.damage >= 80 ? 'A' : data.damage >= 60 ? 'B' : 'C';
+      $('finalGrade').textContent = grade; $('finalGrade').setAttribute('data-grade', grade);
+      $('finalShots').textContent = String(data.shots); $('finalBonus').textContent = String(data.ammoBonus || 0);
+      $('ammoBonusRow').hidden = !data.cleared || !(data.ammoBonus > 0);
+      $('resultTitle').textContent = data.cleared ? '全楼拆除完成。' : '弹药用尽，本轮结束。';
+      $('resultHint').textContent = grade === 'S' ? 'S级已达成，试着用更少弹药完成。' : grade === 'A' ? '距S级还差' + (100 - data.damage) + '%' : grade === 'B' ? '距A级还差' + (80 - data.damage) + '%' : '距B级还差' + (60 - data.damage) + '%';
+      $('status').textContent = '挑战结束';
       best = Math.max(best, data.score); $('best').textContent = best.toLocaleString();
-      try { localStorage.setItem('skyfall-mobile-best', String(best)); } catch {}
+      try { localStorage.setItem('skyfall-mobile-best-loop-v1', String(best)); } catch {}
       showModal('result');
     }
     updateHud();
   }
-  function syncAim() {
-    engine.direction();
+  function syncAim(clampInput = false) {
+    const limits = engine.aimLimits();
+    $('height').min = limits.min; $('height').max = limits.max;
+    if (clampInput) {
+      engine.aim.height = clamp(engine.aim.height, limits.min, limits.max);
+      engine.direction();
+    }
     $('angle').min = -Math.floor(Math.atan2(Math.max(0, engine.aim.height - 1.5), 42) * 180 / Math.PI);
     $('height').value = engine.aim.height; $('angle').value = engine.aim.angle;
-    $('heightValue').textContent = engine.aim.height.toFixed(1) + ' m';
+    $('heightValue').textContent = engine.aim.height.toFixed(1) + ' m' + (engine.aim.height > limits.max ? '（高于残楼）' : '');
     $('angleValue').textContent = engine.aim.angle + '°';
   }
   function reset() {
     if (!engine?.loaded) return;
     audio?.reset();
-    engine.reset(); resultShown = false; paused = false; $('result').hidden = true;
+    const autoAim = engine.autoAim, supportGuideEnabled = engine.supportGuideEnabled;
+    engine.reset(); engine.autoAim = autoAim; engine.supportGuideEnabled = supportGuideEnabled; syncSupportGuide(); resultShown = false; paused = false; $('result').hidden = true;
     syncAudioPause();
     $('pauseBtn').setAttribute('aria-pressed', 'false'); $('pauseBtn').innerHTML = '<svg><use href="#i-pause"/></svg>';
-    $('status').textContent = '建筑已重建 · 换个位置再试试'; updateHud();
+    $('status').textContent = '建筑已重建 · 4发弹药准备就绪'; syncAim(); refreshAim();
   }
-  function chooseQuality(mode, automatic = false) {
+  function chooseQuality(mode) {
     quality = mode; engine.setQuality(mode); $('qualityBtn').textContent = '画质：' + qualityNames[mode];
-    if (!automatic) { autoQuality = false; try { localStorage.setItem('skyfall-mobile-quality', mode); } catch {} }
-    badFrames = 0;
+    try { localStorage.setItem('skyfall-mobile-quality', mode); } catch {}
+  }
+  function syncAutoAim() {
+    $('autoAimToggle').setAttribute('aria-pressed', String(engine.autoAim));
+    $('autoAimToggle').textContent = '辅助瞄准：' + (engine.autoAim ? '开' : '关');
+  }
+  function cancelAimTween() {
+    if (!engine.aimTween) return;
+    engine.aimTween = null; syncAim(); updateHud();
+  }
+  function refreshAim(manual = false) {
+    const wasValid = engine.aimValid;
+    if (engine.state === 'ready') engine.refreshAimValidity?.({ manual });
+    if (engine.state === 'ready' && !engine.aimTween && wasValid !== engine.aimValid) {
+      if (engine.aimValid) {
+        clearTimeout(toastTimer); $('toast').hidden = true; $('status').textContent = '已瞄准楼体 · 可发射';
+      } else $('status').textContent = '重新瞄准 · 暖色楼体仍可打';
+    }
+    updateHud();
   }
   try {
     engine = new SkyfallEngine($('world'), onEvent);
-    chooseQuality(quality, true); $('loadingText').textContent = '正在载入建筑与街区…';
+    engine.autoAim = false; syncAutoAim();
+    engine.supportGuideEnabled = true; syncSupportGuide();
+    chooseQuality(quality); $('loadingText').textContent = '正在载入建筑与街区…';
     const deadline = new Promise((_, reject) => { startupTimer = setTimeout(() => reject(new Error('场景准备超时，请重新加载或换系统浏览器打开。')), 180000); });
     await Promise.race([engine.load(loadingProgress), deadline]); clearTimeout(startupTimer);
     if (startupFailed) return;
-    $('loading').hidden = true; updateHud(); syncAim();
+    $('loading').hidden = true; syncAudioPause(); syncAim(); refreshAim();
   } catch (error) {
     console.error(error);
     if (!startupFailed) loadingFailure(error); return;
@@ -135,39 +241,56 @@
     if (pointers.size >= 2) {
       const next = multiBaseline();
       if (gesture && next.span > 5 && gesture.span > 5) {
+        cancelAimTween();
         engine.orbit.distance = clamp(engine.orbit.distance * gesture.span / next.span, 19, 115);
         engine.orbit.height = clamp(engine.orbit.height + (next.cy - gesture.cy) * .055, 1.5, 33);
+        refreshAim(true);
       }
       gesture = next;
     } else if (single) {
       if (Math.hypot(e.clientX - single.x, e.clientY - single.y) > 5) single.moved = true;
-      if (single.moved) { engine.orbit.yaw -= dx * .007; engine.orbit.pitch = clamp(engine.orbit.pitch + dy * .005, -.04, 1.2); }
+      if (single.moved) { cancelAimTween(); engine.orbit.yaw -= dx * .007; engine.orbit.pitch = clamp(engine.orbit.pitch + dy * .005, -.04, 1.2); refreshAim(true); }
     }
   });
   function pointerEnd(e) {
     if (!pointers.has(e.pointerId)) return;
     const canPick = e.type === 'pointerup' && pointers.size === 1 && single && !single.moved;
     pointers.delete(e.pointerId);
-    if (canPick && engine.pick(e.clientX, e.clientY)) { syncAim(); $('status').textContent = '撞击点已更新 · 金色箭头指示发射方向'; }
+    if (canPick) cancelAimTween();
+    if (canPick) { engine.pick(e.clientX, e.clientY); syncAim(); updateHud(); }
     if (pointers.size === 0) single = gesture = null;
     else { const p = [...pointers.values()][0]; single = { ...p, moved: true }; gesture = multiBaseline(); }
   }
   for (const name of ['pointerup', 'pointercancel', 'lostpointercapture']) canvas.addEventListener(name, pointerEnd);
-  canvas.addEventListener('wheel', e => { if (modalOpen()) return; e.preventDefault(); engine.orbit.distance = clamp(engine.orbit.distance * Math.exp(e.deltaY * .001), 19, 115); }, { passive: false });
+  canvas.addEventListener('wheel', e => { if (modalOpen()) return; e.preventDefault(); cancelAimTween(); engine.orbit.distance = clamp(engine.orbit.distance * Math.exp(e.deltaY * .001), 19, 115); refreshAim(true); }, { passive: false });
   canvas.addEventListener('contextmenu', e => e.preventDefault());
   document.querySelectorAll('[data-weapon]').forEach(button => button.addEventListener('click', () => {
     if (engine.state !== 'ready') return; weapon = button.dataset.weapon; engine.weapon = weapon;
     document.querySelectorAll('[data-weapon]').forEach(b => b.setAttribute('aria-pressed', String(b === button)));
-    $('status').textContent = weapon === 'meteor' ? '陨石 · 炽热贯穿与大范围粉碎' : weapon === 'ball' ? '铁球 · 重击贯穿与承重破坏' : '火箭 · 高速贯穿与连锁爆破';
+    $('status').textContent = weapon === 'meteor' ? '陨石 · 大范围冲击，适合低层成片承重' : weapon === 'ball' ? '铁球 · 集中撞击承重结构，适合残楼补刀' : '火箭 · 沿列下切，瞄准中下部承重列';
   }));
   $('fire').onclick = () => { if (modalOpen() || paused) return; unlockAudio(); if (engine.state === 'finished') reset(); else engine.fire(weapon); };
-  $('reset').onclick = reset; $('again').onclick = () => { hideModal('result'); reset(); }; $('inspect').onclick = () => hideModal('result');
-  $('home').onclick = () => engine.resetCamera();
-  $('zoomIn').onclick = () => { engine.orbit.distance = clamp(engine.orbit.distance * .84, 19, 115); };
-  $('zoomOut').onclick = () => { engine.orbit.distance = clamp(engine.orbit.distance * 1.19, 19, 115); };
+  $('reset').onclick = reset; $('again').onclick = () => { hideModal('result'); reset(); };
+  if (debugEnabled) $('debugToggle').onclick = () => {
+    $('debugDetails').hidden = !$('debugDetails').hidden;
+    $('debugToggle').setAttribute('aria-expanded', String(!$('debugDetails').hidden));
+    $('debugToggle').textContent = $('debugDetails').hidden ? '展开' : '收起'; updateDebug();
+  };
+  $('home').onclick = () => { cancelAimTween(); engine.resetCamera(); refreshAim(true); };
+  $('zoomIn').onclick = () => { cancelAimTween(); engine.orbit.distance = clamp(engine.orbit.distance * .84, 19, 115); refreshAim(true); };
+  $('zoomOut').onclick = () => { cancelAimTween(); engine.orbit.distance = clamp(engine.orbit.distance * 1.19, 19, 115); refreshAim(true); };
   $('aimToggle').onclick = () => { $('aimPanel').hidden = !$('aimPanel').hidden; $('aimToggle').setAttribute('aria-expanded', String(!$('aimPanel').hidden)); };
-  $('height').oninput = e => { engine.aim.height = Number(e.target.value); syncAim(); };
-  $('angle').oninput = e => { engine.aim.angle = Number(e.target.value); syncAim(); };
+  $('autoAimToggle').onclick = () => {
+    engine.autoAim = !engine.autoAim;
+    if (!engine.autoAim) cancelAimTween();
+    else if (engine.state === 'ready') engine.recoverAim?.();
+    syncAutoAim(); syncAim(); refreshAim();
+  };
+  $('supportGuideToggle').onclick = () => {
+    engine.supportGuideEnabled = !engine.supportGuideEnabled; syncSupportGuide(); updateHud();
+  };
+  $('height').oninput = e => { cancelAimTween(); engine.aim.height = Number(e.target.value); syncAim(true); refreshAim(true); };
+  $('angle').oninput = e => { cancelAimTween(); engine.aim.angle = Number(e.target.value); syncAim(true); refreshAim(true); };
   $('pauseBtn').onclick = () => {
     paused = !paused; $('pauseBtn').setAttribute('aria-pressed', String(paused));
     syncAudioPause();
@@ -201,13 +324,13 @@
     }
     if (/INPUT|BUTTON|SELECT/.test(document.activeElement.tagName)) return;
     if (e.code === 'Space') { e.preventDefault(); if (!e.repeat) $('fire').click(); }
-    if (e.code === 'ArrowLeft') engine.orbit.yaw += .12;
-    if (e.code === 'ArrowRight') engine.orbit.yaw -= .12;
+    if (e.code === 'ArrowLeft') { cancelAimTween(); engine.orbit.yaw += .12; refreshAim(true); }
+    if (e.code === 'ArrowRight') { cancelAimTween(); engine.orbit.yaw -= .12; refreshAim(true); }
   });
   window.addEventListener('resize', () => engine.resize());
   window.visualViewport?.addEventListener('resize', () => engine.resize());
   document.addEventListener('visibilitychange', () => {
-    prev = 0; elapsed = 0; pointers.clear(); single = gesture = null;
+    prev = 0; elapsed = 0; debugFrames = 0; debugElapsed = 0; pointers.clear(); single = gesture = null;
     if (document.hidden) { cancelAnimationFrame(frameId); }
     else { frameId = requestAnimationFrame(frame); }
   });
@@ -218,15 +341,26 @@
     elapsed += (now - prev) / 1000; prev = now;
     const interval = 1 / engine.profile.targetFps;
     if (elapsed < interval - .001) return;
-    const dt = Math.min(elapsed, .1); elapsed = 0;
+    // Engine bounds physical substeps; preserve wall time for the stillness timer.
+    const dt = elapsed; elapsed = 0;
+    const wasAiming = Boolean(engine.aimTween);
     if (!paused && !modalOpen()) engine.step(dt);
-    engine.render();
-    if (now - lastHud > 220) { updateHud(); lastHud = now; }
-    // Sustained slow frames reduce fill rate and shadow cost once, with visible notice.
-    if (!paused && !modalOpen() && autoQuality && quality !== 'low') {
-      badFrames = dt > .052 ? badFrames + 1 : Math.max(0, badFrames - 1);
-      if (badFrames > 45) { chooseQuality('low', true); toast('已自动切换省电画质，让运行更轻松'); }
+    if (wasAiming && !engine.aimTween) {
+      engine.refreshAimValidity?.();
+      if (engine.state === 'ready') {
+        $('status').textContent = engine.aimValid ? '辅助瞄准已就绪 · 可发射' : '重新瞄准 · 暖色楼体仍可打';
+        if (engine.aimValid) { clearTimeout(toastTimer); $('toast').hidden = true; }
+      }
     }
+    if (wasAiming || engine.aimTween) { syncAim(); updateHud(); }
+    engine.render();
+    if (debugEnabled) {
+      debugFrames++; debugElapsed += dt;
+      if (debugElapsed >= .5) {
+        debugFps = Math.round(debugFrames / debugElapsed); debugFrames = 0; debugElapsed = 0; updateDebug();
+      }
+    }
+    if (now - lastHud > 220) { updateHud(); lastHud = now; }
   }
   frameId = requestAnimationFrame(frame);
 })();
