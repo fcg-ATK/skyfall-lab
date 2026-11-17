@@ -217,7 +217,8 @@ function create(parts,options={}) {
   }
   assessmentKey=signature;assessmentCache=states;return states;
  }
- function assessPart(part){const value=assessments().get(typeof part==='object'?part.id:part);return value?{...value,supportIds:value.supportIds.slice(),carriedIds:value.carriedIds.slice(),centerOfLoad:{...value.centerOfLoad},failure:value.failure?{...value.failure}:null}:null;}
+ function cloneAssessment(value){return value?{...value,supportIds:value.supportIds.slice(),carriedIds:value.carriedIds.slice(),centerOfLoad:{...value.centerOfLoad},failure:value.failure?{...value.failure}:null}:null;}
+ function assessPart(part){return cloneAssessment(assessments().get(typeof part==='object'?part.id:part));}
  function failOverloaded(only){
   // Only the lowest overloaded bearing on a load path fails this substep.
   // Upper members then descend through the existing contact/gravity solver.
@@ -333,7 +334,7 @@ function create(parts,options={}) {
    const bearing=states.reduce((n,s)=>n+s.bearing.length,0),bridged=states.flatMap(s=>s.bridged.map(p=>p.id));
    const falling=live.filter(p=>p.active).map(p=>p.id),unsupported=states.flatMap(s=>s.unsupported.map(p=>p.id));
    return {floor,live:live.length,bearing,ratio:live.length?bearing/live.length:0,threshold,maxBridgeSpan,bridged,bridgeSpans:states.flatMap(s=>s.bridgeSpans),bridgeRejected:states.flatMap(s=>s.bridgeRejected),unsupported,falling,
-    loads:live.map(p=>assessPart(p.id)),overloaded:live.filter(p=>loads.get(p.id).reason==='overload').map(p=>p.id),failures:parts.filter(p=>p.floor===floor&&failures.has(p.id)).map(p=>({id:p.id,...failures.get(p.id)})),
+    loads:live.map(p=>cloneAssessment(loads.get(p.id))),overloaded:live.filter(p=>loads.get(p.id).reason==='overload').map(p=>p.id),failures:parts.filter(p=>p.floor===floor&&failures.has(p.id)).map(p=>({id:p.id,...failures.get(p.id)})),
     reason:!live.length?'destroyed':live.some(p=>loads.get(p.id).reason==='overload')?'overload':falling.length||unsupported.length?'local support loss':bridged.length?'bridged gap':'bearing'};
   });
  }
@@ -658,7 +659,7 @@ function create(parts,options={}) {
      if(!group.length)continue;
      for(const axis of ['x','y','z']){center[axis]=group.reduce((sum,p)=>sum+p.node.position[axis],0)/group.length;velocity[axis]=group.reduce((sum,p)=>sum+p.vel[axis],0)/group.length;spin[axis]=group.reduce((sum,p)=>sum+p.spin[axis],0)/group.length;}
     }
-    const contacts=[],surfaces=parts.filter(q=>!q.gone&&!members.has(q)).map(q=>({q,s:snapshot(q)}));
+    const contacts=[],surfaces=parts.filter(q=>!q.gone&&!members.has(q)).map(q=>({q,s:null}));
     for(const p of group){
      // Ground remains a persistent constraint even after a different member
      // has fractured or a rotating top face has become the lowest face. Cell
@@ -668,14 +669,16 @@ function create(parts,options={}) {
       if(point.y<=ground+.001)contacts.push({p,support:null,surface:ground,point:{x:point.x,y:ground,z:point.z},depth:ground-point.y,surfaceVelocity:{x:0,y:0,z:0}});
      }
      if(group.some(q=>q.floor<p.floor&&q.cell===p.cell))continue;
+     // These poses stay fixed throughout contact gathering. Test ownership
+     // once for all four corners, retaining the original support order.
+     // Overlapping imported AABBs cannot transfer a falling column's load
+     // sideways on a corner alone. Its centre must cross the boundary to the
+     // neighbouring column (the midpoint of their original centres).
+     const eligible=surfaces.filter(({q})=>!(q.floor>=p.floor)&&ownsLoad(q,p.node.position,p.cell));
      const before=old.get(p),after=contactCorners(p);
      for(let i=0;i<after.length;i++){
       const point=after[i];let surface=options.groundAt?.(point.x,point.z)??.24,support=null,surfaceVelocity={x:0,y:0,z:0};
-      for(const {q,s} of surfaces){if(q.floor>=p.floor)continue;
-       // Overlapping imported AABBs cannot transfer a falling column's load
-       // sideways on a corner alone. Its centre must cross the boundary to the
-       // neighbouring column (the midpoint of their original centres).
-       if(!ownsLoad(q,p.node.position,p.cell))continue;
+      for(const entry of eligible){const {q}=entry,s=entry.s||(entry.s=snapshot(q));
        if(!s.contains(point.x,point.z,.02,.02))continue;
        const y=s.surfaceAt(point.x,point.z);
        if(y>surface&&y<=before[i].y+.12){surface=y;support=q;surfaceVelocity=s.velocityAt(point.x,point.z);}

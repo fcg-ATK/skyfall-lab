@@ -1,0 +1,695 @@
+{
+  "sourceSHA256": "a80cb5b12ed27bf4e9c6204e8d631879cfa6635ad94e39eae22bd3a2144a679d",
+  "results": {
+    "dense point": {
+      "snapshot": {
+        "keys": [
+          "center",
+          "normal",
+          "part",
+          "partId",
+          "point",
+          "t",
+          "time",
+          "velocity"
+        ],
+        "partId": "dense",
+        "partReference": true,
+        "time": 0,
+        "t": 0,
+        "point": [
+          0.10000000000000009,
+          0.16999999999999993,
+          0
+        ],
+        "normal": [
+          "__negative_zero__",
+          0,
+          1
+        ],
+        "center": [
+          0.1,
+          0.17,
+          0
+        ],
+        "velocity": [
+          0.5509999999999999,
+          -0.23000000000000004,
+          0.297
+        ]
+      },
+      "acceptCalls": 0,
+      "normalCalls": 0
+    },
+    "dense touching box": {
+      "snapshot": {
+        "keys": [
+          "center",
+          "normal",
+          "part",
+          "partId",
+          "point",
+          "t",
+          "time",
+          "velocity"
+        ],
+        "partId": "dense",
+        "partReference": true,
+        "time": 0,
+        "t": 0,
+        "point": [
+          0.10000000000000009,
+          0.16999999999999993,
+          0
+        ],
+        "normal": [
+          0,
+          0,
+          1
+        ],
+        "center": [
+          0.1,
+          0.17,
+          0.1
+        ],
+        "velocity": [
+          0.5509999999999999,
+          -0.23000000000000004,
+          0.297
+        ]
+      },
+      "acceptCalls": 0,
+      "normalCalls": 0
+    },
+    "dense overlapping box": {
+      "snapshot": {
+        "keys": [
+          "center",
+          "normal",
+          "part",
+          "partId",
+          "point",
+          "t",
+          "time",
+          "velocity"
+        ],
+        "partId": "dense",
+        "partReference": true,
+        "time": 0,
+        "t": 0,
+        "point": [
+          0.10000000000000009,
+          0.16999999999999993,
+          0
+        ],
+        "normal": [
+          0,
+          0,
+          1
+        ],
+        "center": [
+          0.1,
+          0.17,
+          0.05
+        ],
+        "velocity": [
+          0.5509999999999999,
+          -0.23000000000000004,
+          0.297
+        ]
+      },
+      "acceptCalls": 0,
+      "normalCalls": 0
+    },
+    "point reject first hit": {
+      "snapshot": {
+        "keys": [
+          "center",
+          "normal",
+          "part",
+          "partId",
+          "point",
+          "t",
+          "time",
+          "velocity"
+        ],
+        "partId": "dense",
+        "partReference": true,
+        "time": 0,
+        "t": 0,
+        "point": [
+          0.10000000000000009,
+          0.16999999999999993,
+          0
+        ],
+        "normal": [
+          "__negative_zero__",
+          0,
+          1
+        ],
+        "center": [
+          0.1,
+          0.17,
+          0
+        ],
+        "velocity": [
+          0.5509999999999999,
+          -0.23000000000000004,
+          0.297
+        ]
+      },
+      "acceptCalls": 3,
+      "normalCalls": 0
+    },
+    "point reject first normal": {
+      "snapshot": {
+        "keys": [
+          "center",
+          "normal",
+          "part",
+          "partId",
+          "point",
+          "t",
+          "time",
+          "velocity"
+        ],
+        "partId": "dense",
+        "partReference": true,
+        "time": 0,
+        "t": 0,
+        "point": [
+          0.10000000000000009,
+          0.16999999999999993,
+          0
+        ],
+        "normal": [
+          "__negative_zero__",
+          0,
+          1
+        ],
+        "center": [
+          0.1,
+          0.17,
+          0
+        ],
+        "velocity": [
+          0.5509999999999999,
+          -0.23000000000000004,
+          0.297
+        ]
+      },
+      "acceptCalls": 0,
+      "normalCalls": 3
+    },
+    "point maxTime zero without acceptance": {
+      "snapshot": null,
+      "acceptCalls": 128,
+      "normalCalls": 0
+    },
+    "point rejected zero then positive": {
+      "snapshot": {
+        "keys": [
+          "center",
+          "normal",
+          "part",
+          "partId",
+          "point",
+          "t",
+          "time",
+          "velocity"
+        ],
+        "partId": "far",
+        "partReference": true,
+        "time": 0.5,
+        "t": 0.5,
+        "point": [
+          0.10000000000000009,
+          0.16999999999999993,
+          -0.5
+        ],
+        "normal": [
+          "__negative_zero__",
+          0,
+          1
+        ],
+        "center": [
+          0.1,
+          0.17,
+          -0.5
+        ],
+        "velocity": [
+          0.5509999999999999,
+          -0.23000000000000004,
+          0.297
+        ]
+      },
+      "acceptCalls": 65,
+      "normalCalls": 0
+    },
+    "point accepted positive before rejected zero": {
+      "snapshot": {
+        "keys": [
+          "center",
+          "normal",
+          "part",
+          "partId",
+          "point",
+          "t",
+          "time",
+          "velocity"
+        ],
+        "partId": "far",
+        "partReference": true,
+        "time": 0.5,
+        "t": 0.5,
+        "point": [
+          0.10000000000000009,
+          0.16999999999999993,
+          -0.5
+        ],
+        "normal": [
+          "__negative_zero__",
+          0,
+          1
+        ],
+        "center": [
+          0.1,
+          0.17,
+          -0.5
+        ],
+        "velocity": [
+          0.5509999999999999,
+          -0.23000000000000004,
+          0.297
+        ]
+      },
+      "acceptCalls": 65,
+      "normalCalls": 0
+    },
+    "point visibility exclusions ordinary": {
+      "snapshot": {
+        "keys": [
+          "center",
+          "normal",
+          "part",
+          "partId",
+          "point",
+          "t",
+          "time",
+          "velocity"
+        ],
+        "partId": 6,
+        "partReference": true,
+        "time": 0,
+        "t": 0,
+        "point": [
+          0.10000000000000009,
+          0.16999999999999993,
+          0
+        ],
+        "normal": [
+          "__negative_zero__",
+          0,
+          1
+        ],
+        "center": [
+          0.1,
+          0.17,
+          0
+        ],
+        "velocity": [
+          0.5509999999999999,
+          -0.23000000000000004,
+          0.297
+        ]
+      },
+      "acceptCalls": 0,
+      "normalCalls": 65
+    },
+    "point visibility exclusions small": {
+      "snapshot": {
+        "keys": [
+          "center",
+          "normal",
+          "part",
+          "partId",
+          "point",
+          "t",
+          "time",
+          "velocity"
+        ],
+        "partId": 6,
+        "partReference": true,
+        "time": 0,
+        "t": 0,
+        "point": [
+          0.10000000000000009,
+          0.16999999999999993,
+          0
+        ],
+        "normal": [
+          "__negative_zero__",
+          0,
+          1
+        ],
+        "center": [
+          0.1,
+          0.17,
+          0
+        ],
+        "velocity": [
+          0.5509999999999999,
+          -0.23000000000000004,
+          0.297
+        ]
+      },
+      "acceptCalls": 0,
+      "normalCalls": 65
+    },
+    "point visibility exclusions large": {
+      "snapshot": {
+        "keys": [
+          "center",
+          "normal",
+          "part",
+          "partId",
+          "point",
+          "t",
+          "time",
+          "velocity"
+        ],
+        "partId": 6,
+        "partReference": true,
+        "time": 0,
+        "t": 0,
+        "point": [
+          0.10000000000000009,
+          0.16999999999999993,
+          0
+        ],
+        "normal": [
+          "__negative_zero__",
+          0,
+          1
+        ],
+        "center": [
+          0.1,
+          0.17,
+          0
+        ],
+        "velocity": [
+          0.5509999999999999,
+          -0.23000000000000004,
+          0.297
+        ]
+      },
+      "acceptCalls": 0,
+      "normalCalls": 65
+    },
+    "box reject first hit": {
+      "snapshot": {
+        "keys": [
+          "center",
+          "normal",
+          "part",
+          "partId",
+          "point",
+          "t",
+          "time",
+          "velocity"
+        ],
+        "partId": "dense",
+        "partReference": true,
+        "time": 0,
+        "t": 0,
+        "point": [
+          0.10000000000000009,
+          0.16999999999999993,
+          0
+        ],
+        "normal": [
+          0,
+          0,
+          1
+        ],
+        "center": [
+          0.1,
+          0.17,
+          0.1
+        ],
+        "velocity": [
+          0.5509999999999999,
+          -0.23000000000000004,
+          0.297
+        ]
+      },
+      "acceptCalls": 3,
+      "normalCalls": 0
+    },
+    "box reject first normal": {
+      "snapshot": {
+        "keys": [
+          "center",
+          "normal",
+          "part",
+          "partId",
+          "point",
+          "t",
+          "time",
+          "velocity"
+        ],
+        "partId": "dense",
+        "partReference": true,
+        "time": 0,
+        "t": 0,
+        "point": [
+          0.10000000000000009,
+          0.16999999999999993,
+          0
+        ],
+        "normal": [
+          0,
+          0,
+          1
+        ],
+        "center": [
+          0.1,
+          0.17,
+          0.1
+        ],
+        "velocity": [
+          0.5509999999999999,
+          -0.23000000000000004,
+          0.297
+        ]
+      },
+      "acceptCalls": 0,
+      "normalCalls": 3
+    },
+    "box maxTime zero without acceptance": {
+      "snapshot": null,
+      "acceptCalls": 128,
+      "normalCalls": 0
+    },
+    "box rejected zero then positive": {
+      "snapshot": {
+        "keys": [
+          "center",
+          "normal",
+          "part",
+          "partId",
+          "point",
+          "t",
+          "time",
+          "velocity"
+        ],
+        "partId": "far",
+        "partReference": true,
+        "time": 0.45454545454545453,
+        "t": 0.45454545454545453,
+        "point": [
+          0.10000000000000009,
+          0.16999999999999993,
+          -0.5
+        ],
+        "normal": [
+          0,
+          0,
+          1
+        ],
+        "center": [
+          0.1,
+          0.17,
+          -0.4
+        ],
+        "velocity": [
+          0.5509999999999999,
+          -0.23000000000000004,
+          0.297
+        ]
+      },
+      "acceptCalls": 65,
+      "normalCalls": 0
+    },
+    "box accepted positive before rejected zero": {
+      "snapshot": {
+        "keys": [
+          "center",
+          "normal",
+          "part",
+          "partId",
+          "point",
+          "t",
+          "time",
+          "velocity"
+        ],
+        "partId": "far",
+        "partReference": true,
+        "time": 0.45454545454545453,
+        "t": 0.45454545454545453,
+        "point": [
+          0.10000000000000009,
+          0.16999999999999993,
+          -0.5
+        ],
+        "normal": [
+          0,
+          0,
+          1
+        ],
+        "center": [
+          0.1,
+          0.17,
+          -0.4
+        ],
+        "velocity": [
+          0.5509999999999999,
+          -0.23000000000000004,
+          0.297
+        ]
+      },
+      "acceptCalls": 65,
+      "normalCalls": 0
+    },
+    "box visibility exclusions ordinary": {
+      "snapshot": {
+        "keys": [
+          "center",
+          "normal",
+          "part",
+          "partId",
+          "point",
+          "t",
+          "time",
+          "velocity"
+        ],
+        "partId": 6,
+        "partReference": true,
+        "time": 0,
+        "t": 0,
+        "point": [
+          0.10000000000000009,
+          0.16999999999999993,
+          0
+        ],
+        "normal": [
+          0,
+          0,
+          1
+        ],
+        "center": [
+          0.1,
+          0.17,
+          0.1
+        ],
+        "velocity": [
+          0.5509999999999999,
+          -0.23000000000000004,
+          0.297
+        ]
+      },
+      "acceptCalls": 0,
+      "normalCalls": 65
+    },
+    "box visibility exclusions small": {
+      "snapshot": {
+        "keys": [
+          "center",
+          "normal",
+          "part",
+          "partId",
+          "point",
+          "t",
+          "time",
+          "velocity"
+        ],
+        "partId": 6,
+        "partReference": true,
+        "time": 0,
+        "t": 0,
+        "point": [
+          0.10000000000000009,
+          0.16999999999999993,
+          0
+        ],
+        "normal": [
+          0,
+          0,
+          1
+        ],
+        "center": [
+          0.1,
+          0.17,
+          0.1
+        ],
+        "velocity": [
+          0.5509999999999999,
+          -0.23000000000000004,
+          0.297
+        ]
+      },
+      "acceptCalls": 0,
+      "normalCalls": 65
+    },
+    "box visibility exclusions large": {
+      "snapshot": {
+        "keys": [
+          "center",
+          "normal",
+          "part",
+          "partId",
+          "point",
+          "t",
+          "time",
+          "velocity"
+        ],
+        "partId": 6,
+        "partReference": true,
+        "time": 0,
+        "t": 0,
+        "point": [
+          0.10000000000000009,
+          0.16999999999999993,
+          0
+        ],
+        "normal": [
+          0,
+          0,
+          1
+        ],
+        "center": [
+          0.1,
+          0.17,
+          0.1
+        ],
+        "velocity": [
+          0.5509999999999999,
+          -0.23000000000000004,
+          0.297
+        ]
+      },
+      "acceptCalls": 0,
+      "normalCalls": 65
+    }
+  }
+}

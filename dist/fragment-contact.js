@@ -255,8 +255,8 @@
         if(!tested&&boxTime(node.box,localStart,localDelta,localExtent,latest)===Infinity) return;
         if(node.left) {
           const left=boxTime(node.left.box,localStart,localDelta,localExtent,latest),right=boxTime(node.right.box,localStart,localDelta,localExtent,latest);
-          if(left<=right) {if(left!==Infinity)triangleQuery(node.left,record,true);if(right<=latest)triangleQuery(node.right,record,true);}
-          else {if(right!==Infinity)triangleQuery(node.right,record,true);if(left<=latest)triangleQuery(node.left,record,true);}
+          if(left<=right) {if(left!==Infinity&&triangleQuery(node.left,record,true))return true;if(right<=latest)return triangleQuery(node.right,record,true);}
+          else {if(right!==Infinity&&triangleQuery(node.right,record,true))return true;if(left<=latest)return triangleQuery(node.left,record,true);}
           return;
         }
         for(let i=node.first;i<node.last;i++) {
@@ -276,6 +276,10 @@
           const hit={partId:part.id,part,point:point.clone(),normal:hitNormal.clone(),center:center.clone(),time,t:time,velocity};
           if(options.accept&&!options.accept(hit)) continue;
           best=hit;latest=time;
+          // Finite triangle times are nonnegative. Once an accepted hit owns
+          // t=0, the existing first-hit EPS guard rejects every later result.
+          // Propagate termination only after both acceptance callbacks pass.
+          if(latest===0)return true;
         }
       }
       function recordQuery(record) {
@@ -289,18 +293,18 @@
         localExtent.set(abs(m[0])*extent.x+abs(m[4])*extent.y+abs(m[8])*extent.z,
           abs(m[1])*extent.x+abs(m[5])*extent.y+abs(m[9])*extent.z,
           abs(m[2])*extent.x+abs(m[6])*extent.y+abs(m[10])*extent.z);
-        triangleQuery(record.tree.root,record);
+        return triangleQuery(record.tree.root,record);
       }
       function meshQuery(node) {
         if(boxTime(node.box,start,delta,extent,latest)===Infinity) return;
-        if(node.left) {meshQuery(node.left);meshQuery(node.right);return;}
-        for(let i=node.first;i<node.last;i++)recordQuery(records[i]);
+        if(node.left)return meshQuery(node.left)||meshQuery(node.right);
+        for(let i=node.first;i<node.last;i++)if(recordQuery(records[i]))return true;
       }
       // A large coherent body's envelope can cover most of the building.
       // Retain the BVH per sample instead of scanning that entire pool; a
       // tiny ordered pool is cheaper to test directly. Membership is built
       // once per reusable candidate array and does not retain expired arrays.
-      if(pool&&pool.length<=4)for(const record of pool)recordQuery(record);
+      if(pool&&pool.length<=4){for(const record of pool)if(recordQuery(record))break;}
       else meshQuery(root);
       return best;
     }
