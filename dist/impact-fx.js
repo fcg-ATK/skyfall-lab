@@ -189,7 +189,16 @@
         ring.origin.addScaledVector(direction,-.5); ring.size = power;
         ring.quaternion.setFromUnitVectors(axisZ,direction);
       }
-      const smokeCount = quality === 'low' ? (ball ? 1 : 2) : ball ? 2 : meteor ? 4 : 3;
+      // Small entry-face concrete jets accompany the crack before darker smoke
+      // rises. They use the existing smoke batch and leave the new hole legible.
+      if (!ball && !meteor) for (let i = 0; i < 2; i++) {
+        const p = acquire(smoke,point,.34+i*.07,.025+i*.015), side = i ? 1 : -1;
+        p.origin.addScaledVector(direction,-.55).addScaledVector(right,side*.35*power);
+        p.velocity.copy(right).multiplyScalar(side*3.7*power).addScaledVector(direction,-.7);
+        p.velocity.y = .25; p.size = .82*power; p.opacity = .16; p.kind = 1;
+        p.angle = side*.32; p.turn = side*.2;
+      }
+      const smokeCount = quality === 'low' ? (ball ? 1 : 2) : ball ? 2 : meteor ? 4 : 2;
       for (let i = 0; i < smokeCount; i++) {
         const p = acquire(smoke,point,ball ? .65 : 1.15+i*.12,ball ? .04 : .14+i*.025);
         const angle = i*2.399963+serial*.23;
@@ -211,7 +220,18 @@
         p.velocity.y += 1.4*power;
         p.origin.addScaledVector(direction,sign*.3);
         p.size = (.025+(i%3)*.012)*Math.sqrt(power); p.stretch = .25+(i%5)*.09;
-        p.kind = ball && i%3 !== 0 ? 1 : 0; p.opacity = 1;
+        p.kind = (ball && i%3 !== 0) || (!meteor && !ball && i%3 === 0) ? 1 : 0; p.opacity = 1;
+      }
+    }
+    function structuralRelease(event = {}) {
+      const { point, energy = 1 } = event;
+      if (!finite(point) || !Number.isFinite(energy) || energy <= 0) return;
+      const size = Math.sqrt(clamp(energy,.15,2)), count = quality === 'low' ? 2 : 3;
+      for (let i = 0; i < count; i++) {
+        const p = acquire(smoke,point,.62+i*.07), angle = i*2.399963+serial*.13;
+        p.origin.x += Math.cos(angle)*.38*size; p.origin.z += Math.sin(angle)*.38*size;
+        p.velocity.set(Math.cos(angle)*.45,-.24,Math.sin(angle)*.45);
+        p.size = .72*size; p.opacity = .14; p.kind = 1; p.angle = angle; p.turn = .12;
       }
     }
     function step(dt) {
@@ -238,7 +258,7 @@
             opacity *= p.kind === 0 ? Math.pow(1-t,.7) : Math.min(1,(1-t)*3.2);
           } else if (batch === shock) {
             dummy.quaternion.copy(p.quaternion);
-            dummy.scale.setScalar((.4+15.5*(1-Math.exp(-age*5.5)))*p.size);
+            dummy.scale.setScalar((.4+8.6*(1-Math.exp(-age*8)))*p.size);
             opacity *= Math.pow(1-t,1.8)*.75;
           } else if (batch === smoke) {
             dummy.position.addScaledVector(p.velocity,age);
@@ -296,7 +316,7 @@
       return { active, pending, layers, capacity, allocated: 232, maxDrawCalls: 4, textureSize: 128, quality };
     }
     setQuality('balanced');
-    return { burst, step, render, reset, setQuality, stats };
+    return { burst, structuralRelease, step, render, reset, setQuality, stats };
   }
   window.SkyfallImpactFX = Object.freeze({ create });
 })();

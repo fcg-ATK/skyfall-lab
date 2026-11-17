@@ -3,8 +3,9 @@ const test=require('node:test'),assert=require('node:assert/strict');
 const fs=require('node:fs'),path=require('node:path');
 const file=path.resolve(__dirname,'../dist/collapse-solver.js');
 const Solver=fs.existsSync(file)?require(file):{};
-function fixture(floors=5){
- const parts=Array.from({length:floors*4},(_,id)=>{const floor=Math.floor(id/4),cell=id%4;const pos={x:(cell%2)*4,y:1.5+floor*3,z:Math.floor(cell/2)*4};return{id,floor,cell,center:{...pos},rest:{...pos},restQ:{x:0,y:0,z:0,w:1},halfExtents:{x:2,y:1.5,z:2},node:{position:{...pos},quaternion:{x:0,y:0,z:0,w:1}},vel:{x:0,y:0,z:0},spin:{x:0,y:0,z:0},active:false,gone:false};});
+function fixture(floors=5,columns=2,rows=2){
+ const cells=columns*rows;
+ const parts=Array.from({length:floors*cells},(_,id)=>{const floor=Math.floor(id/cells),cell=id%cells;const pos={x:(cell%columns)*4,y:1.5+floor*3,z:Math.floor(cell/columns)*4};return{id,floor,cell,center:{...pos},rest:{...pos},restQ:{x:0,y:0,z:0,w:1},halfExtents:{x:2,y:1.5,z:2},node:{position:{...pos},quaternion:{x:0,y:0,z:0,w:1}},vel:{x:0,y:0,z:0},spin:{x:0,y:0,z:0},active:false,gone:false};});
  const events=[];
  const solver=Solver.create(parts,{floorHeights:Array.from({length:floors+1},(_,i)=>i*3),groundAt:()=>0,
  activate(p){p.active=true;p.phase='falling';}, fracture(p,e){events.push({id:p.id,y:p.node.position.y,...e});p.gone=true;p.active=true;p.phase='fragmented';}});
@@ -19,7 +20,7 @@ test('v6 missing base moves every connected upper floor together without timer g
  assert.equal(events.length,0,'falling through open air must not fracture anything');
 });
 
-test('one-sided support loss moves only the unsupported side with mirrored lean',()=>{
+test('one-sided support loss recruits its adjacent strip into a mirrored coherent lean',()=>{
  const outcomes=[];
  for(const failedX of [0,4]){
   const {parts,solver}=fixture();
@@ -27,7 +28,9 @@ test('one-sided support loss moves only the unsupported side with mirrored lean'
   step(solver,.5);
   const roof=parts.filter(p=>p.floor===4&&p.rest.x===failedX&&!p.gone);
   assert.equal(roof.length,2,'unsupported roof must survive open-air descent');
-  assert.ok(parts.filter(p=>p.rest.x!==failedX).every(p=>!p.active&&p.node.position.y===p.rest.y),'supported side must stay in place');
+  const recruited=parts.filter(p=>p.floor>0&&p.rest.x!==failedX);
+  assert.ok(recruited.every(p=>p.active&&!p.gone&&Math.abs(p.node.quaternion.z-roof[0].node.quaternion.z)<1e-8),'shared slab bending moves the neighboring upper strip before it fractures');
+  assert.ok(parts.filter(p=>p.floor===0&&!p.gone).every(p=>!p.active&&p.node.position.y===p.rest.y),'surviving ground bearings remain fixed while the upper mass tips');
   const direction=failedX===0?-1:1;
   const drift=roof.reduce((s,p)=>s+p.node.position.x-p.rest.x,0)/roof.length;
   assert.ok(drift*direction>.08,`roof must drift toward the missing bearings: ${drift}`);
@@ -54,13 +57,13 @@ test('tilted support snapshots match their moving plane and remain immutable',()
  assert.equal(support.velocityAt(0,0).y,-3);
 });
 
-test('local compression progresses down the falling column without breaking bearing siblings',()=>{
- const {parts,solver,events}=fixture();
+test('compression progresses through the recruited strip and preserves distant bearing columns',()=>{
+ const {parts,solver,events}=fixture(5,4);
  for(const p of parts)if(p.floor===0&&p.rest.x===0)p.gone=true;
  step(solver,3);
  assert.ok(events.length>4,'compression must progress beyond the first support');
- assert.ok(events.every(e=>parts[e.id].rest.x===0),'overlapping bounds cannot pass compression into the supported side');
- assert.ok(parts.filter(p=>p.rest.x===4).every(p=>!p.active&&!p.gone&&p.node.position.y===p.rest.y));
+ assert.ok(events.every(e=>parts[e.id].rest.x<=4),'contact failure stays inside the directly unsupported and immediately recruited strips');
+ assert.ok(parts.filter(p=>p.rest.x>=8).every(p=>!p.active&&!p.gone&&p.node.position.y===p.rest.y),'remote columns cannot receive damage through overlapping slab bounds');
 });
 test('v6 unsupported parts do not automatically fracture at .45 seconds',()=>{
  const {parts,solver,events}=fixture(); for(const p of parts.filter(p=>p.floor<3))p.gone=true;
@@ -80,10 +83,12 @@ test('moderate upper mass contacts the lower support without interpenetrating',(
  assert.ok(events.filter(e=>parts[e.id].floor>=3).every(e=>e.cause==='compression'));
  assert.ok(parts.every(p=>p.gone||p.node.position.y-p.halfExtents.y>=-.01));
 });
-test('losing an exterior bearing releases that column and preserves the other three',()=>{
- const {parts,solver}=fixture();parts[0].gone=true;step(solver,.2);
+test('losing an exterior bearing recruits only edge neighbors and preserves the remote frame',()=>{
+ const {parts,solver}=fixture(5,4);parts[0].gone=true;step(solver,.2);
  assert.ok(parts.filter(p=>p.floor>0&&p.cell===0).every(p=>p.active));
- assert.ok(parts.filter(p=>p.cell!==0).every(p=>!p.active&&p.node.position.y===p.rest.y));
+ assert.ok(parts.filter(p=>p.floor>0&&[1,4].includes(p.cell)).every(p=>p.active&&!p.gone),'both immediate slab edges transmit the eccentric load');
+ assert.ok(parts.filter(p=>![0,1,4].includes(p.cell)).every(p=>!p.active&&!p.gone&&p.node.position.y===p.rest.y),'recruitment must stop before the next neighboring strip');
+ assert.ok(parts.filter(p=>p.floor===0&&p.cell!==0).every(p=>!p.active&&!p.gone&&p.node.position.y===p.rest.y));
 });
 test('v6 intact architecture never moves and reset removes previous groups',()=>{
  const {parts,solver}=fixture();step(solver,1);assert.ok(parts.every(p=>p.node.position.y===p.rest.y&&!p.active));

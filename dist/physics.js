@@ -14,9 +14,9 @@
     high: { pixelRatio: 1.5, maxPixels: 1800000, dust: 120, fragments: 320, shadows: true, targetFps: 60 },
   };
   const WEAPONS = {
-    ball: { radius: 6.5 },
-    rocket: { radius: 4.2 },
-    meteor: { radius: 5.5 },
+    ball: { radius: 0, height: 0 },
+    rocket: { radius: 4.1, depth: 3.4, height: 0 },
+    meteor: { radius: 6.2, height: 3.8 },
   };
 
   function qualityProfile(mode) {
@@ -55,7 +55,7 @@
     return Math.hypot(point.x - piece.center.x, point.z - piece.center.z);
   }
 
-  function collapsePlan(pieces, hitIds, weapon, random = () => 0.5) {
+  function collapsePlan(pieces, hitIds, weapon, random = () => 0.5, impactPoint = null) {
     if (!Array.isArray(pieces) || !hitIds || typeof hitIds[Symbol.iterator] !== 'function') return [];
     const unique = new Map();
     for (const piece of pieces) {
@@ -70,25 +70,30 @@
       const n = typeof random === 'function' ? random() : 0.5;
       return Number.isFinite(n) ? clamp(n, 0, 1) : 0.5;
     };
-    const floorMap = new Map();
-    for (const piece of unique.values()) {
-      if (!floorMap.has(piece.floor)) floorMap.set(piece.floor, []);
-      floorMap.get(piece.floor).push(piece);
-    }
     const plan = new Map();
     const add = (id, delay) => {
       if (!plan.has(id) || delay < plan.get(id)) plan.set(id, delay);
     };
     for (const id of hitSet) add(id, 0);
 
-    // Lateral blast stays on the struck storey. The precise ball has no blast,
-    // even when imported sector bounds or centres overlap.
+    // A ball damages only the members it physically hits. Explosions radiate
+    // from the contact point; broad overlapping mesh bounds cannot extend them.
+    // A meteor reaches at most one neighboring storey inside a compact ellipsoid.
     for (const id of hitSet) {
       const hit = unique.get(id);
-      for (const piece of floorMap.get(hit.floor)) {
-        if (hitSet.has(piece.id)) continue;
-        const distance = distanceToSector(hit.center, piece);
-        if (config.radius > 0 && distance <= config.radius) add(piece.id, 0.28 + distance / 130 + sample() * 0.02);
+      const origin = finiteVector(impactPoint) ? impactPoint : hit.center;
+      for (const piece of unique.values()) {
+        if (hitSet.has(piece.id) || config.radius === 0) continue;
+        const floorDistance = Math.abs(piece.floor - hit.floor);
+        if (floorDistance > (config.height > 0 ? 1 : 0)) continue;
+        // The rocket opens a compact patch across the building's plan axes,
+        // not an entire storey. Contact remains the centre, never a mesh AABB.
+        const distance = config.depth
+          ? Math.hypot((piece.center.x - origin.x) / config.radius, (piece.center.z - origin.z) / config.depth)
+          : distanceToSector(origin, piece) / config.radius;
+        const vertical = config.height > 0 ? (piece.center.y - origin.y) / config.height : 0;
+        const normalizedDistance = Math.hypot(distance, vertical);
+        if (normalizedDistance <= 1 + 1e-10) add(piece.id, 0.08 + normalizedDistance * 0.16 + sample() * 0.02);
       }
     }
 

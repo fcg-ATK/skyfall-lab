@@ -132,3 +132,40 @@ test('zero direction and malformed frame input cannot poison instance matrices',
   });
   fx.step(4); fx.render(camera); assert.equal(visibleCount(scene), 0);
 });
+
+test('rocket pressure and concrete spall stay compact enough to show the contact opening', () => {
+  const { fx, scene, camera, point, direction } = fixture();
+  fx.burst(point, direction, 'rocket'); fx.step(.08); fx.render(camera);
+  const smoke = scene.getObjectByName('impact_smoke');
+  assert.ok(smoke.count > 0, 'brief pale spall starts while the impact fire is still present');
+  for (let i = 0; i < smoke.count; i++) {
+    assert.equal(smoke.geometry.attributes.aEffect.getZ(i), 1, 'early spall is powdered concrete, not black smoke');
+    assert.ok(smoke.geometry.attributes.aEffect.getY(i) < .2, 'spall must remain translucent');
+  }
+  fx.step(.28); fx.render(camera);
+  const ring = scene.getObjectByName('impact_shock'), matrix = new T.Matrix4(), size = new T.Vector3();
+  ring.getMatrixAt(0, matrix); size.setFromMatrixScale(matrix);
+  assert.ok(size.x <= 9, 'pressure cue stays close to the compact rocket footprint');
+});
+
+test('real support release emits a finite pale seam puff without a second explosion or new GPU resources', () => {
+  const { fx, scene, camera, point } = fixture(), initial = resources(scene);
+  assert.equal(typeof fx.structuralRelease, 'function');
+  fx.structuralRelease({ point, energy: 0 }); fx.render(camera);
+  assert.equal(visibleCount(scene), 0, 'no release energy produces no dust');
+  fx.structuralRelease({ point, energy: 1 }); fx.step(.12); fx.render(camera);
+  const live = fx.stats().layers;
+  assert.ok(live.smoke > 0 && live.smoke <= 3);
+  assert.equal(live.fire + live.flash + live.shock + live.sparks, 0);
+  const smoke = scene.getObjectByName('impact_smoke');
+  for (let i = 0; i < smoke.count; i++) {
+    assert.equal(smoke.geometry.attributes.aEffect.getZ(i), 1);
+    assert.ok(smoke.geometry.attributes.aEffect.getY(i) < .2);
+  }
+  for (let i = 0; i < 400; i++) fx.structuralRelease({ point, energy: 1 });
+  assert.deepEqual(resources(scene), initial);
+  assert.ok(fx.stats().active <= 10, 'release puffs share the existing smoke limit');
+  fx.step(2); fx.render(camera); assert.equal(visibleCount(scene), 0);
+  fx.structuralRelease({ point, energy: 1 }); fx.reset();
+  assert.equal(fx.stats().active, 0);
+});

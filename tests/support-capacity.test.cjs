@@ -12,9 +12,11 @@ test('intact real building has finite grounded load paths and reserve, without s
  assert.deepEqual(roof.supportIds,[33]);assert.ok(base.carriedIds.includes(41));assert.equal(base.reason,'bearing');
  assert.equal(events.length,0);assert.ok(parts.every(p=>!p.active&&!p.gone));
 });
-test('peripheral bearing loss leaves the broad grounded residual stable',()=>{
+test('peripheral bearing loss recruits a local strip while the broad grounded residual remains stable',()=>{
  const {parts,solver,events}=actual();parts[0].gone=true;advance(solver,.2);
- assert.ok(parts.filter(p=>p.cell!==0).every(p=>!p.active&&!p.gone));
+ assert.ok(parts.filter(p=>p.floor>0&&p.cell===1).every(p=>p.active&&!p.gone),'shared edge transfers load into the first adjacent upper strip');
+ assert.ok(parts.filter(p=>![0,1].includes(p.cell)).every(p=>!p.active&&!p.gone&&p.node.position.y===p.rest.y),'all six distant load paths retain their original geometry');
+ assert.ok(parts.filter(p=>p.floor===0&&p.cell!==0).every(p=>!p.active&&!p.gone&&p.node.position.y===p.rest.y));
  assert.ok(parts.filter(p=>p.cell===0&&p.floor>0).every(p=>p.active));
  assert.equal(events.filter(e=>e.cause==='overload').length,0);
 });

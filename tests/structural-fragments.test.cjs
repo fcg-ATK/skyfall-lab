@@ -9,6 +9,8 @@ const context = vm.createContext({ window: {}, console, Float32Array, Uint8Array
 vm.runInContext(fs.readFileSync(path.join(dist, 'three-local.js'), 'utf8'), context);
 const file = path.join(dist, 'structural-fragments.js');
 if (fs.existsSync(file)) vm.runInContext(fs.readFileSync(file, 'utf8'), context);
+const contactFile = path.join(dist, 'fragment-contact.js');
+if (fs.existsSync(contactFile)) vm.runInContext(fs.readFileSync(contactFile, 'utf8'), context);
 const T = context.window.THREE;
 const V = (x = 0, y = 0, z = 0) => new T.Vector3(x, y, z);
 
@@ -55,6 +57,122 @@ function setup({ count = 2, y = 8, parentTransform = false, centered = false, ha
   manager.prepare(otherPart ? [part,otherPart] : [part], descriptor, arrayBuffer);
   return { manager, scene, parent, part, otherPart, descriptor, solid, glass };
 }
+
+function contactWall(scene, id = 99, z = -1, width = 8) {
+  const node = new T.Group();
+  node.add(new T.Mesh(new T.BoxGeometry(width,20,.05),new T.MeshBasicMaterial()));
+  node.position.set(0,8,z); scene.add(node);
+  return { id, floor: 2, node, vel: V(), spin: V(), gone:false };
+}
+
+test('flying fragment is intercepted by an actual thin wall and transfers only its normal kinetic energy', () => {
+  const {manager,part,scene}=setup({count:1,half:[.2,.2,.2]});
+  const wall=contactWall(scene), collider=context.window.SkyfallFragmentContact.create([part,wall]);
+  assert.equal(typeof manager.setCollider,'function','fragment manager must accept actual mesh contacts');
+  const immediate=[]; manager.setCollider(collider,event=>immediate.push(event));
+  manager.release(part,{energy:0,velocity:V(3,0,-90)});
+  const events=manager.step(.1,[]), piece=manager.sample(17,1)[0];
+  const impact=events.find(event=>event.type==='fragment-wall');
+  assert.ok(impact,'a frame whose endpoints both miss the thin wall must still produce contact');
+  assert.equal(immediate.length,1); assert.equal(immediate[0],impact);
+  assert.equal(impact.partId,17); assert.equal(impact.targetPartId,99);
+  assert.ok(impact.normal.z>.99); assert.ok(Math.abs(impact.point.z+.975)<1e-6);
+  assert.ok(piece.position.z>-.78,'finite fragment cannot cross intact wall');
+  assert.ok(piece.velocity.z>=0,'normal travel must bounce or stop');
+  assert.ok(piece.velocity.length()<15,'collision dissipates most incoming normal energy');
+  assert.ok(Math.abs(impact.kineticEnergy-.5*impact.mass*impact.energy*impact.energy)<1e-5);
+  assert.ok(impact.impulse>=impact.mass*impact.energy);
+  for(let i=0;i<60;i++) manager.step(1/60,[]);
+  assert.equal(immediate.length,1,'resting or repeated overlap must not repeatedly damage one target');
+});
+
+test('window miss stays ballistic and reset preserves fixed batches while clearing contact deduplication', () => {
+  const {manager,part,scene}=setup({count:1,half:[.1,.1,.1]});
+  const wall=contactWall(scene); wall.node.children[0].position.x=5;
+  const collider=context.window.SkyfallFragmentContact.create([part,wall]);
+  assert.equal(typeof manager.setCollider,'function');
+  const events=[];manager.setCollider(collider,event=>events.push(event));
+  manager.release(part,{energy:0,velocity:V(0,0,-30)});manager.step(.1,[]);
+  assert.ok(manager.sample(17,1)[0].position.z<-2.8,'no broadphase cell envelope may fill a clear opening');
+  assert.equal(events.length,0);
+  wall.node.children[0].position.x=0;collider.sync();
+  const resources=manager.stats();
+  for(let i=0;i<2;i++) {
+    manager.reset();manager.release(part,{energy:0,velocity:V(0,0,-30)});manager.step(.1,[]);
+  }
+  assert.equal(events.length,2,'a new shot after reset can contact the same target again');
+  assert.equal(manager.stats().geometries,resources.geometries);
+  assert.equal(manager.stats().materials,resources.materials);
+  assert.equal(manager.stats().textures,resources.textures);
+});
+
+test('wall callback removes an obstruction before a later fragment query in the same frame', () => {
+  const {manager,part,scene}=setup({count:2,spacing:0,half:[.1,.1,.1]});
+  const wall=contactWall(scene),collider=context.window.SkyfallFragmentContact.create([wall]);
+  assert.equal(typeof manager.setCollider,'function');
+  manager.setCollider(collider,()=>{wall.gone=true;wall.node.visible=false;});
+  manager.release(part,{energy:0,velocity:V(0,0,-30)});
+  const events=manager.step(.1,[]).filter(event=>event.type==='fragment-wall');
+  assert.equal(events.length,1);
+  const pieces=manager.sample(17,2);
+  assert.ok(pieces[0].position.z>-.9);assert.ok(pieces[1].position.z<-2.8);
+});
+
+test('breaking a wall spends measured normal energy before sweeping the next wall in the same substep', () => {
+  const {manager,part,scene}=setup({count:1,half:[.1,.1,.1]});
+  const near=contactWall(scene,91,-.5),far=contactWall(scene,92,-1);
+  const collider=context.window.SkyfallFragmentContact.create([near,far]);
+  const immediate=[];
+  manager.setCollider(collider,event=>{
+    immediate.push(event);
+    if(event.targetPartId===91) { near.gone=true;return {broken:true,spentEnergy:event.kineticEnergy*.75}; }
+    return {broken:false,spentEnergy:0};
+  });
+  manager.release(part,{energy:0,velocity:V(0,0,-120)});
+  const events=manager.step(1/60,[]).filter(event=>event.type==='fragment-wall');
+  assert.equal(events.length,2,'residual motion must see the next real obstruction in the same substep');
+  assert.equal(events[0].targetPartId,91);assert.equal(events[1].targetPartId,92);
+  assert.ok(Math.abs(events[1].kineticEnergy/events[0].kineticEnergy-.25)<1e-6);
+  assert.ok(manager.sample(17,1)[0].position.z>-.88,'unbroken second wall stops the remaining path');
+});
+
+test('an earlier intact floor stops a descending piece before an unreachable lower wall can receive damage', () => {
+  const {manager,part,scene}=setup({count:1,half:[.1,.1,.1]});
+  const wall=contactWall(scene);
+  wall.node.children[0].geometry=new T.BoxGeometry(8,.5,.05);wall.node.position.y=6;
+  const collider=context.window.SkyfallFragmentContact.create([wall]);
+  manager.setCollider(collider);
+  const floor={id:90,floor:2,top:7,minX:-10,maxX:10,minZ:-10,maxZ:10};
+  manager.release(part,{energy:0,velocity:V(0,-120,-60)});
+  const events=manager.step(1/60,[floor]);
+  assert.equal(events.filter(event=>event.type==='fragment-wall').length,0,
+    'chronologically later mesh contact is blocked by the earlier floor');
+  assert.ok(events.some(event=>event.supportId===90));
+});
+
+test('moving-wall transport cannot mint damage energy for a later stationary wall', () => {
+  const {manager,part,scene}=setup({count:1,half:[1,1,1]});
+  part.node.position.z=1.03;
+  const moving=contactWall(scene,91,0),stationary=contactWall(scene,92,2.5);
+  moving.vel.z=6;
+  const collider=context.window.SkyfallFragmentContact.create([moving,stationary]),contacts=[];
+  manager.setCollider(collider,event=>{contacts.push(event);return {broken:false,spentEnergy:0};});
+  manager.release(part,{energy:0,velocity:V(0,0,-1)});
+  manager.step(.05,[]);
+  const transported=manager.sample(17,1)[0];
+  assert.ok(transported.velocity.z>6,'a moving wall still imparts physical transport velocity');
+  for(let i=0;i<10&&contacts.length<2;i++) manager.step(1/60,[]);
+  assert.equal(contacts.length,2);
+  assert.equal(contacts[0].mass,900);
+  assert.ok(Number.isFinite(contacts[0].availableEnergy),'real contacts must carry an independently bounded work balance');
+  const second=contacts[1];
+  assert.equal(second.targetPartId,92);assert.ok(second.kineticEnergy>15000,'relative collision motion is preserved');
+  assert.ok(second.availableEnergy<1000,'borrowed moving-wall velocity cannot pay a 6000J wall reserve');
+  const sample=manager.sample(17,1)[0];
+  assert.ok(second.availableEnergy<=450+900*9.8*Math.max(0,8-sample.position.y)+1e-6,'only initial flight energy and gravity can fund damage');
+  manager.reset();manager.release(part,{energy:0,velocity:V()});manager.step(1/60,[]);
+  assert.equal(contacts.length,2,'reset cannot retain former damage balance or contacts');
+});
 
 test('release preserves current transformed centers and relative rotation, including moved parent', () => {
   const { manager, part, parent, descriptor } = setup({ parentTransform: true });

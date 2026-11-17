@@ -39,7 +39,7 @@
     const ratio = total ? Math.min(.95, loaded / total * .95) : 0;
     $('loadingBar').style.width = Math.round(ratio * 100) + '%';
   }
-  try { best = Number(localStorage.getItem('skyfall-mobile-best-loop-v1')) || 0; quality = localStorage.getItem('skyfall-mobile-quality') || 'balanced'; } catch {}
+  try { best = Number(localStorage.getItem('skyfall-local-detail-preview-best')) || 0; quality = localStorage.getItem('skyfall-mobile-quality') || 'balanced'; } catch {}
   if (!Object.hasOwn(qualityNames, quality)) quality = 'balanced';
   $('best').textContent = best.toLocaleString();
   function toast(message) {
@@ -76,10 +76,15 @@
     if ($('debugPanel').hidden || !engine?.loaded) return;
     const m = engine.metrics();
     const selected = engine.aimValid === false ? null : engine.supportInsight;
+    const architecture = engine.parts || [];
+    const directCells = new Set(architecture.filter(p => p.direct).map(p => p.cell));
+    const structural = architecture.filter(p => p.active && !p.gone);
+    const coupled = structural.filter(p => !directCells.has(p.cell));
     $('debugSummary').textContent = 'FPS ' + debugFps + ' · Draw ' + m.drawCalls;
     const fixed = value => Number(value || 0).toFixed(2);
     $('debugDetails').textContent = [
       'moving ' + m.moving + ' · relevantMoving ' + m.relevantMoving,
+      'structural ' + structural.length + ' · coupled ' + coupled.length,
       'stillTime ' + fixed(m.stillTime) + 's · damageQuietTime ' + fixed(m.damageQuietTime) + 's',
       'shots ' + m.shots + ' · remainingAmmo ' + engine.remainingAmmo,
       'hitCount ' + (m.shotHits || []).length + ' · shotHits [' + (m.shotHits || []).join(', ') + ']',
@@ -99,7 +104,7 @@
   function updateHud() {
     if (!engine) return;
     $('score').textContent = engine.score.toLocaleString(); $('damage').textContent = engine.damage + '%';
-    $('ammo').textContent = engine.remainingAmmo + ' / ' + engine.maxShots;
+    $('ammo').textContent = engine.freeMode ? '∞' : engine.remainingAmmo + ' / ' + engine.maxShots;
     const ready = engine.state === 'ready' && !engine.aimTween, finished = engine.state === 'finished';
     const emptyTarget = ready && engine.aimValid === false;
     $('fire').disabled = !engine.loaded || emptyTarget || (!ready && !finished);
@@ -137,6 +142,7 @@
     audio?.play(name, data);
     if (name === 'launch') { $('status').textContent = '已发射 · 拖动视角观察'; $('aimPanel').hidden = true; $('aimToggle').setAttribute('aria-expanded', 'false'); }
     if (name === 'impact') $('status').textContent = '命中！观察失稳与连锁坍塌';
+    if (name === 'strain') $('status').textContent = data?.kind === 'tipping' ? '支撑断开 · 楼体正在偏转' : '支撑失效 · 楼层正在下坠';
     if (name === 'miss') $('status').textContent = '这次没有命中 · 调低高度或换个方向';
     if (name === 'emptyAim') { toast('这里已经空了，换个位置试试'); $('status').textContent = '重新瞄准 · 暖色楼体仍可打'; }
     if (name === 'aimEmpty') {
@@ -158,10 +164,10 @@
       $('finalShots').textContent = String(data.shots); $('finalBonus').textContent = String(data.ammoBonus || 0);
       $('ammoBonusRow').hidden = !data.cleared || !(data.ammoBonus > 0);
       $('resultTitle').textContent = data.cleared ? '全楼拆除完成。' : '弹药用尽，本轮结束。';
-      $('resultHint').textContent = grade === 'S' ? 'S级已达成，试着用更少弹药完成。' : grade === 'A' ? '距S级还差' + (100 - data.damage) + '%' : grade === 'B' ? '距A级还差' + (80 - data.damage) + '%' : '距B级还差' + (60 - data.damage) + '%';
+      $('resultHint').textContent = grade === 'S' ? '换一个落点，再试一种拆法。' : grade === 'A' ? '距S级还差' + (100 - data.damage) + '%' : grade === 'B' ? '距A级还差' + (80 - data.damage) + '%' : '距B级还差' + (60 - data.damage) + '%';
       $('status').textContent = '挑战结束';
       best = Math.max(best, data.score); $('best').textContent = best.toLocaleString();
-      try { localStorage.setItem('skyfall-mobile-best-loop-v1', String(best)); } catch {}
+      try { localStorage.setItem('skyfall-local-detail-preview-best', String(best)); } catch {}
       showModal('result');
     }
     updateHud();
@@ -185,7 +191,7 @@
     engine.reset(); engine.autoAim = autoAim; engine.supportGuideEnabled = supportGuideEnabled; syncSupportGuide(); resultShown = false; paused = false; $('result').hidden = true;
     syncAudioPause();
     $('pauseBtn').setAttribute('aria-pressed', 'false'); $('pauseBtn').innerHTML = '<svg><use href="#i-pause"/></svg>';
-    $('status').textContent = '建筑已重建 · 4发弹药准备就绪'; syncAim(); refreshAim();
+    $('status').textContent = '建筑已重建 · 自由试拆'; syncAim(); refreshAim();
   }
   function chooseQuality(mode) {
     quality = mode; engine.setQuality(mode); $('qualityBtn').textContent = '画质：' + qualityNames[mode];
@@ -211,6 +217,7 @@
   }
   try {
     engine = new SkyfallEngine($('world'), onEvent);
+    engine.freeMode = true;
     engine.autoAim = false; syncAutoAim();
     engine.supportGuideEnabled = true; syncSupportGuide();
     chooseQuality(quality); $('loadingText').textContent = '正在载入建筑与街区…';
@@ -267,7 +274,7 @@
   document.querySelectorAll('[data-weapon]').forEach(button => button.addEventListener('click', () => {
     if (engine.state !== 'ready') return; weapon = button.dataset.weapon; engine.weapon = weapon;
     document.querySelectorAll('[data-weapon]').forEach(b => b.setAttribute('aria-pressed', String(b === button)));
-    $('status').textContent = weapon === 'meteor' ? '陨石 · 大范围冲击，适合低层成片承重' : weapon === 'ball' ? '铁球 · 集中撞击承重结构，适合残楼补刀' : '火箭 · 沿列下切，瞄准中下部承重列';
+    $('status').textContent = weapon === 'meteor' ? '陨石 · 接触后范围冲击，波及相邻楼层' : weapon === 'ball' ? '铁球 · 局部穿透，最多击穿两处结构' : '火箭 · 沿列下切，瞄准中下部承重列';
   }));
   $('fire').onclick = () => { if (modalOpen() || paused) return; unlockAudio(); if (engine.state === 'finished') reset(); else engine.fire(weapon); };
   $('reset').onclick = reset; $('again').onclick = () => { hideModal('result'); reset(); };

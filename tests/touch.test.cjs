@@ -86,7 +86,7 @@ async function boot(options = {}) {
       this.state = 'finished'; this.score = score; this.damage = damage; this.ammoBonus = ammoBonus;
       this.onEvent('finished', { score, damage, shots: this.shots, remainingAmmo: this.remainingAmmo, ammoBonus, cleared, canContinue: false });
     }
-    reset() { this.resets++; this.state = 'ready'; this.score = 0; this.damage = 0; this.shots = 0; this.ammoBonus = 0; this.remainingAmmo = 4; this.supportGuideEnabled = true; }
+    reset() { this.resets++; this.state = 'ready'; this.score = 0; this.damage = 0; this.shots = 0; this.ammoBonus = 0; this.maxShots = this.freeMode ? Infinity : 4; this.remainingAmmo = this.maxShots; this.supportGuideEnabled = true; }
     resetCamera() {}
     resize() { this.resizes++; }
     step(dt) { this.steps.push(dt); options.duringStep?.(this, dt); }
@@ -243,7 +243,7 @@ test('shot settlement updates the HUD without a modal or focus change and the ne
   assert.equal(h.get('result').hidden, true);
   assert.equal(h.document.activeElement, h.get('fire'));
   assert.equal(h.get('fire').disabled, false);
-  assert.equal(h.get('ammo').textContent, '3 / 4');
+  assert.equal(h.get('ammo').textContent, '∞');
   assert.equal(h.get('height').disabled, false); assert.equal(h.get('meteor').disabled, false);
   h.get('meteor').click(); h.get('fire').click();
   assert.deepEqual(h.engine.fires, ['rocket', 'meteor']);
@@ -289,22 +289,23 @@ test('slow frames never override any of the three persisted manual quality modes
   }
 });
 
-test('loop score records ignore prior rules and survive reopening', async () => {
-  const storage = new Map([['skyfall-mobile-best', '999999'], ['skyfall-mobile-best-fixed-v1', '9999'], ['skyfall-mobile-quality', 'high']]);
+test('preview score records ignore prior rules and survive reopening', async () => {
+  const storage = new Map([['skyfall-mobile-best', '999999'], ['skyfall-mobile-best-fixed-v1', '9999'], ['skyfall-mobile-best-loop-v1', '8888'], ['skyfall-mobile-quality', 'high']]);
   const h = await boot({ storage });
   assert.equal(h.get('best').textContent, '0');
   assert.equal(h.engine.quality, 'high');
   h.get('fire').click(); h.engine.finish({ score: 5700, damage: 100, cleared: true, ammoBonus: 900 });
-  assert.equal(storage.get('skyfall-mobile-best-loop-v1'), '5700');
+  assert.equal(storage.get('skyfall-local-detail-preview-best'), '5700');
   assert.equal(storage.get('skyfall-mobile-best-fixed-v1'), '9999');
+  assert.equal(storage.get('skyfall-mobile-best-loop-v1'), '8888');
   const reopened = await boot({ storage });
   assert.equal(reopened.get('best').textContent, (5700).toLocaleString());
   reopened.get('fire').click(); reopened.engine.shotFinished({ score: 2300, damage: 48, shotDamage: 48 });
   reopened.get('fire').click(); reopened.engine.finish({ score: 5400, damage: 100, cleared: true, ammoBonus: 600 });
-  assert.equal(storage.get('skyfall-mobile-best-loop-v1'), '5700');
+  assert.equal(storage.get('skyfall-local-detail-preview-best'), '5700');
 });
 
-test('the fourth settled shot opens one terminal result with a single rebuild action and no zero bonus line', async () => {
+test('a terminal engine event opens one result with a single rebuild action and no zero bonus line', async () => {
   const h = await boot();
   for (let shot = 1; shot <= 4; shot++) {
     h.get('fire').click();
@@ -320,7 +321,7 @@ test('the fourth settled shot opens one terminal result with a single rebuild ac
   h.get('fire').click(); assert.equal(h.engine.resets, 0, 'modal blocks the underlying fire control');
   h.get('again').click();
   assert.equal(h.engine.resets, 1); assert.equal(h.get('result').hidden, true);
-  assert.equal(h.engine.damage, 0); assert.equal(h.get('ammo').textContent, '4 / 4');
+  assert.equal(h.engine.damage, 0); assert.equal(h.get('ammo').textContent, '∞');
 });
 
 test('a full clear displays remaining-ammo bonus and a later zero-bonus clear hides that row', async () => {
@@ -382,7 +383,7 @@ test('aim assistance is off for each new session and its accessible toggle contr
 test('an empty-target rejection shows guidance without opening results or consuming ammo', async () => {
   const h = await boot({ emptyAim: true }); h.get('fire').focus(); h.get('fire').click();
   assert.equal(h.get('toast').hidden, false); assert.equal(h.get('toast').textContent, '这里已经空了，换个位置试试');
-  assert.equal(h.get('ammo').textContent, '4 / 4'); assert.equal(h.engine.shots, 0);
+  assert.equal(h.get('ammo').textContent, '∞'); assert.equal(h.engine.shots, 0);
   assert.equal(h.get('fire').disabled, false); assert.equal(h.get('result').hidden, true);
   assert.equal(h.document.activeElement, h.get('fire'));
 });
@@ -519,7 +520,7 @@ test('results show the next rating gap and a positive message for a true full cl
     assert.equal(h.get('resultHint').textContent, hint);
   }
   h.get('reset').click(); h.engine.finish({ score: 5700, damage: 100, cleared: true, ammoBonus: 900 });
-  assert.match(h.get('resultHint').textContent, /S级.*达成/); assert.doesNotMatch(h.get('resultHint').textContent, /还差/);
+  assert.equal(h.get('resultHint').textContent, '换一个落点，再试一种拆法。'); assert.doesNotMatch(h.get('resultHint').textContent, /还差/);
 });
 
 test('manual validity changes replace stale aim feedback together with the fire state', async () => {
@@ -633,4 +634,21 @@ test('support guidance keeps a short lower-only message and explains a slender c
   h.engine.supportInsight = { supportIds: [1], carriedIds: [3, 4], criticalReason: 'unbraced load exceeds capacity' };
   h.engine.onEvent('aimSelected', {});
   assert.equal(h.get('supportHint').textContent, '侧向支撑不足，此处承重已超限');
+});
+
+
+test('free preview HUD keeps unlimited ammo and no terminal modal after five settled shots', async () => {
+  const h = await boot();
+  assert.equal(h.engine.freeMode, true);
+  for (let shot = 1; shot <= 5; shot++) {
+    h.get('fire').click();
+    h.engine.shotFinished({ score: shot * 100, damage: shot * 2, shotDamage: 2 });
+    assert.equal(h.engine.fires.length, shot);
+    assert.equal(h.get('ammo').textContent, '∞');
+    assert.equal(h.get('result').hidden, true);
+    assert.equal(h.get('fire').disabled, false);
+  }
+  h.get('reset').click();
+  assert.equal(h.engine.shots, 0);
+  assert.equal(h.get('ammo').textContent, '∞');
 });

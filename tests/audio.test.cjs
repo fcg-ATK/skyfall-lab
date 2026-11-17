@@ -141,6 +141,39 @@ test('rocket, meteor and iron-ball impacts have distinct pitch and duration enve
   assert.equal(new Set(signatures).size, 3);
 });
 
+test('rocket attack ends before the longer low rumble produced by an actual landing', async () => {
+  const h = boot(); await h.audio.unlock();
+  h.audio.play('impact', { weapon: 'rocket' });
+  const attack = h.contexts[0].sources.slice();
+  assert.ok(attack.some(s => s.stopAt < .16), 'impact includes a sharp leading transient');
+  assert.ok(attack.every(s => s.stopAt < .6), 'explosion must not impersonate a continuing collapse');
+  h.contexts[0].advance(1);
+  h.audio.play('floorImpact', { floor: 2, energy: 1 });
+  const rumble = h.contexts[0].sources.slice(attack.length).filter(s => s.kind === 'tone' && s.stopAt > 2.2);
+  assert.ok(rumble.length > 0, 'a real landing adds a distinct sustained bass tail');
+  assert.ok(rumble.every(s => s.frequency.events[0].value < 80 && s.started >= 1.05));
+  const gain = rumble[0].connections[0];
+  assert.ok(gain.gain.events[1].at - rumble[0].started >= .07, 'collapse rumble swells rather than clicking');
+});
+
+test('structural strain is a restrained per-floor cue with lifecycle cancellation', async () => {
+  const h = boot(); await h.audio.unlock();
+  h.audio.play('strain', { floor: 2, energy: 0 });
+  assert.equal(h.live().length, 0);
+  h.audio.play('strain', { floor: 2, energy: 1 });
+  const first = h.contexts[0].sources.length;
+  assert.ok(first > 0 && first <= 3);
+  for (let i = 0; i < 100; i++) h.audio.play('strain', { floor: 2, energy: 1 });
+  assert.equal(h.contexts[0].sources.length, first, 'one release wave cannot become a loud repeated crackle');
+  h.audio.play('strain', { floor: 3, energy: 1 });
+  assert.ok(h.contexts[0].sources.length > first);
+  h.audio.setPaused(true); assert.equal(h.live().length, 0);
+  h.audio.play('strain', { floor: 4, energy: 1 }); assert.equal(h.live().length, 0);
+  h.audio.setPaused(false); await h.audio.unlock();
+  h.audio.play('strain', { floor: 2, energy: 1 }); assert.ok(h.live().length > 0);
+  h.contexts[0].advance(2); assert.equal(h.live().length, 0);
+});
+
 test('all supported events end cleanly and unknown events allocate no nodes', async () => {
   const h = boot(); await h.audio.unlock();
   for (const type of ['launch', 'impact', 'penetration', 'fracture', 'floorImpact']) {

@@ -1,5 +1,5 @@
-/* Actual PC fracture meshes, two fixed surface batches. Rigid ballistic motion
-   and swept floor contacts are a mobile visual approximation, not a solver. */
+/* Actual PC fracture meshes, two fixed surface batches. Swept structural mesh
+   contacts and floor/terrain motion use bounded mobile approximations. */
 (function () {
   'use strict';
   const T = window.THREE;
@@ -33,6 +33,9 @@ vec3 fragmentRotate(vec3 p, vec4 q) {
     const tempQuaternion = new T.Quaternion(), deltaQuaternion = new T.Quaternion();
     const direction = new T.Vector3(), radial = new T.Vector3(), tangent = new T.Vector3();
     const normal = new T.Vector3(), surfaceVelocity = new T.Vector3(), relative = new T.Vector3();
+    const contactStart = new T.Vector3(), contactEnd = new T.Vector3();
+    let collider = null, onContact = null;
+    const acceptContactNormal = (normal, part) => !(normal.y>.8&&supportMap.has(part.id));
     let prepared = false, texture = null, transformData = null, depthMaterial = null;
     let dirty = false, triangles = 0, profile = { shadows: true, targetFps: 30 };
     let activeCount = 0, movingCount = 0, settledCount = 0, carriedCount = 0, uploads = 0;
@@ -104,6 +107,7 @@ vec3 fragmentRotate(vec3 p, vec4 q) {
           mass: Math.min(900, 8 * data.half[0] * data.half[1] * data.half[2] * .12 * (data.kind === 'glass' ? 2500 : 1800)),
           active: false, settled: false, supportId: null, supportTop: GROUND, contacts: 0, angularTime: 0,
           grounded: false, stableTime: 0, deposited: false, relevant: false, surfaceVelocity: new T.Vector3(),
+          wallContacts: new Set(), damageEnergy: 0,
         };
         states.push(s);
         const key = String(part.id);
@@ -131,6 +135,9 @@ vec3 fragmentRotate(vec3 p, vec4 q) {
         const source = sourceMaterials[range.kind];
         const material = source ? source.clone() : new T.MeshStandardMaterial({ color: range.kind === 'glass' ? 0x9bb9be : 0xb1aca2, roughness: .75 });
         material.name = 'PCFracture_' + range.kind;
+        // Detailed-building raycast proxies use invisible materials. Debris
+        // must still render when cloned from one of those source materials.
+        material.visible = true;
         material.vertexColors = true;
         material.side = T.DoubleSide;
         if (range.kind === 'glass') {
@@ -173,6 +180,7 @@ vec3 fragmentRotate(vec3 p, vec4 q) {
         if (s.active) continue;
         s.active = true; s.settled = false; s.supportId = null; s.contacts = 0; s.angularTime = 0;
         s.grounded = false; s.stableTime = 0; s.deposited = false; s.surfaceVelocity.set(0,0,0);
+        s.wallContacts.clear();
         s.position.copy(s.localCenter).applyMatrix4(part.node.matrixWorld);
         s.quaternion.copy(deltaQuaternion);
         s.velocity.copy(inherited);
@@ -205,6 +213,7 @@ vec3 fragmentRotate(vec3 p, vec4 q) {
         if (direct) s.angular.multiplyScalar(4.5);
         else s.angular.normalize().multiplyScalar(Math.min(2, impactSpeed * .12) * (.7 + noise(s.id, 14) * .3));
         s.angular.add(angular);
+        s.damageEnergy=.5*s.mass*s.velocity.lengthSq();
         moving.add(s);
         extent(s); writePose(s); released++;
       }
@@ -313,6 +322,7 @@ vec3 fragmentRotate(vec3 p, vec4 q) {
     }
     function sleep(s) {
       s.settled = true; s.velocity.copy(s.surfaceVelocity); s.angular.set(0,0,0);
+      updateDamageEnergy(s,s.position.y);
       moving.delete(s); setRelevant(s, false);
       movingCount--; settledCount++;
       if (s.supportId != null) restingOnSupport.add(s);
@@ -327,7 +337,98 @@ vec3 fragmentRotate(vec3 p, vec4 q) {
       return slept;
     }
 
-    function step(dt, supports = []) {
+    function setCollider(value, handler) {
+      collider = value || null; onContact = typeof handler === 'function' ? handler : null;
+    }
+    function updateDamageEnergy(s, fromY, toY = s.position.y) {
+      // Physical transport can borrow momentum from a moving support. Only
+      // launch energy and a real loss of gravitational potential fund damage;
+      // changing the carrier's velocity cannot refill that separate balance.
+      s.damageEnergy=Math.max(0,Math.min(s.damageEnergy+s.mass*GRAVITY*(fromY-toY),.5*s.mass*s.velocity.lengthSq()));
+    }
+    function floorContactTime(s, start, end, surfaces, alpha0, alpha1, frameDuration) {
+      let earliest=Infinity;
+      const oldBottom=start.y-s.extent.y,bottom=end.y-s.extent.y;
+      for(const support of surfaces) {
+        const previous=support.previous||support;
+        if(Math.max(start.x,end.x)+s.extent.x<Math.min(previous.minX,support.minX)||
+           Math.min(start.x,end.x)-s.extent.x>Math.max(previous.maxX,support.maxX)||
+           Math.max(start.z,end.z)+s.extent.z<Math.min(previous.minZ,support.minZ)||
+           Math.min(start.z,end.z)-s.extent.z>Math.max(previous.maxZ,support.maxZ)) continue;
+        const oldGap=oldBottom-sweepHeight(support,start.x,start.z,alpha0,frameDuration);
+        const newGap=bottom-sweepHeight(support,end.x,end.z,alpha1,frameDuration);
+        if(!Number.isFinite(oldGap+newGap)||oldGap<-.06||newGap>1e-7||newGap>oldGap+1e-8) continue;
+        const t=clamp(oldGap/Math.max(.0001,oldGap-newGap),0,1);
+        if(t<earliest&&overlap(s,support,start.x+(end.x-start.x)*t,start.z+(end.z-start.z)*t)) earliest=t;
+      }
+      if(end.y<=start.y) {
+        const oldGap=oldBottom-groundHeight(start.x,start.z),newGap=bottom-groundHeight(end.x,end.z);
+        if(newGap<=0) earliest=Math.min(earliest,clamp(oldGap/Math.max(.0001,oldGap-newGap),0,1));
+      }
+      return earliest;
+    }
+    function moveWithContacts(s, duration, activeCollider, events, surfaces, alpha0, frameDuration) {
+      const p=s.position,v=s.velocity;
+      if(!activeCollider) {const fromY=p.y;p.addScaledVector(v,duration);updateDamageEnergy(s,fromY);return;}
+      let remaining=duration, elapsed=0, ignored=null;
+      // A broken front wall may expose a second real wall in the same step.
+      // Bound this loop; a wedged chip stops rather than tunnelling through an
+      // unbounded stack of surfaces or consuming a frame in collision work.
+      for(let contact=0;contact<4&&remaining>1e-7;contact++) {
+        contactStart.copy(p);contactEnd.copy(p).addScaledVector(v,remaining);
+        const hit=activeCollider.sweep(contactStart,contactEnd,{
+          excludePartId:s.partId,excludeIds:ignored,halfExtents:s.extent,
+          // Existing moving support tops already own these landings and their
+          // relative-height sweep. Side and underside triangles remain solid.
+          acceptNormal: acceptContactNormal,
+        });
+        if(!hit) {p.copy(contactEnd);updateDamageEnergy(s,contactStart.y);return;}
+        // A lower wall cannot receive damage after an earlier intact floor
+        // already intercepted this trajectory. Let the existing top solver
+        // handle that earlier contact, including its moving-plane response.
+        if(!s.grounded&&hit.time>floorContactTime(s,contactStart,contactEnd,surfaces,
+          alpha0+elapsed/frameDuration,alpha0+(elapsed+remaining)/frameDuration,frameDuration)+1e-7) {
+          p.copy(contactEnd);updateDamageEnergy(s,contactStart.y);return;
+        }
+        updateDamageEnergy(s,contactStart.y,hit.center.y);
+        p.copy(hit.center).addScaledVector(hit.normal,.002);
+        if(p.y>hit.center.y)s.damageEnergy=Math.max(0,s.damageEnergy-s.mass*GRAVITY*(p.y-hit.center.y));
+        relative.copy(v).sub(hit.velocity);
+        const impact=Math.max(0,-relative.dot(hit.normal));
+        const kineticEnergy=.5*s.mass*impact*impact;
+        let outcome=null;
+        const key=String(hit.partId);
+        if(impact>1.3&&!s.wallContacts.has(key)) {
+          s.wallContacts.add(key);
+          const event={type:'fragment-wall',point:hit.point,normal:hit.normal,velocity:v.clone(),
+            floor:hit.part.floor,partId:s.partId,sourcePartId:s.partId,pieceId:s.id,targetPartId:hit.partId,supportId:hit.partId,
+            energy:impact,normalSpeed:impact,mass:s.mass,impulse:s.mass*impact*1.08,kineticEnergy,availableEnergy:s.damageEnergy,
+            firstContact:s.wallContacts.size===1,time:hit.time,target:hit.part};
+          events.push(event);
+          // Damage is synchronous: later fragments in this frame see the
+          // changed target visibility instead of hitting an already gone wall.
+          if(onContact) outcome=onContact(event);
+        }
+        relative.addScaledVector(hit.normal,impact);
+        if(outcome?.broken) {
+          const spent=Number.isFinite(outcome.spentEnergy)?Math.max(0,outcome.spentEnergy):kineticEnergy;
+          s.damageEnergy=Math.max(0,s.damageEnergy-spent);
+          const speed=Math.sqrt(Math.max(0,impact*impact-2*spent/Math.max(.0001,s.mass)));
+          relative.multiplyScalar(.9).addScaledVector(hit.normal,-speed);
+          if(!ignored) ignored=new Set();ignored.add(hit.partId);
+          s.angular.multiplyScalar(.85);
+        } else {
+          relative.multiplyScalar(.78).addScaledVector(hit.normal,impact*.08);
+          s.angular.multiplyScalar(.65);
+        }
+        v.copy(hit.velocity).add(relative);
+        updateDamageEnergy(s,p.y);
+        if(!outcome?.broken) return;
+        elapsed+=remaining*hit.time;remaining*=Math.max(0,1-hit.time);
+      }
+    }
+
+    function step(dt, supports = [], activeCollider = collider) {
       const events = [];
       simulated = supportChecks = 0;
       if (!prepared || !activeCount || !Number.isFinite(dt) || dt <= 0) return events;
@@ -356,8 +457,10 @@ vec3 fragmentRotate(vec3 p, vec4 q) {
         } else {
           const top = heightAt(support,x,z), y = top+s.extent.y;
           const moved = Math.abs(x-s.position.x)+Math.abs(y-s.position.y)+Math.abs(z-s.position.z) > 1e-8;
+          const oldY=s.position.y;
           s.position.set(x,y,z); s.supportTop = top;
           s.velocity.copy(surfaceVelocity); s.surfaceVelocity.copy(surfaceVelocity);
+          updateDamageEnergy(s,oldY);
           if (moved || surfaceVelocity.lengthSq() > 1e-8) carriedCount++;
           if (moved) writePose(s);
         }
@@ -391,10 +494,11 @@ vec3 fragmentRotate(vec3 p, vec4 q) {
               tangent.crossVectors(normal,relative).multiplyScalar(1/Math.max(.18,s.extent.y));
               s.angular.lerp(tangent,1-Math.exp(-5*h));
               v.copy(surfaceVelocity).add(relative);
-              p.addScaledVector(v,h);
+              moveWithContacts(s,h,activeCollider,events,surfaces,iteration/steps,duration);
               if (!support || overlap(s,support)) {
                 const top = support ? sweepHeight(support,p.x,p.z,(iteration+1)/steps,duration) : groundHeight(p.x,p.z);
-                p.y = top+s.extent.y; s.supportTop = top;
+                const priorY=p.y;p.y = top+s.extent.y; s.supportTop = top;
+                updateDamageEnergy(s,priorY);
                 s.surfaceVelocity.copy(surfaceVelocity);
                 s.stableTime = relative.lengthSq() < .0064 && s.angular.lengthSq() < .0324 ? s.stableTime+h : 0;
                 if (s.stableTime >= .28) {
@@ -402,7 +506,8 @@ vec3 fragmentRotate(vec3 p, vec4 q) {
                   if (support) {
                     const remaining = (steps-iteration-1)*h;
                     p.addScaledVector(surfaceVelocity,remaining);
-                    p.y = heightAt(support,p.x,p.z)+s.extent.y;
+                    const priorY=p.y;p.y = heightAt(support,p.x,p.z)+s.extent.y;
+                    updateDamageEnergy(s,priorY);
                     if (surfaceVelocity.lengthSq() > 1e-8) carriedCount++;
                   }
                 }
@@ -414,7 +519,7 @@ vec3 fragmentRotate(vec3 p, vec4 q) {
             }
           }
           v.y -= GRAVITY*h; v.x *= drag; v.z *= drag;
-          p.addScaledVector(v,h);
+          moveWithContacts(s,h,activeCollider,events,surfaces,iteration/steps,duration);
           const bottom = p.y-s.extent.y;
           let landing = null, top = -Infinity;
           for (const support of surfaces) {
@@ -441,7 +546,8 @@ vec3 fragmentRotate(vec3 p, vec4 q) {
             normalAt(landing,p.x,p.z); velocityAt(landing,p.x,p.z,surfaceVelocity);
             relative.copy(v).sub(surfaceVelocity);
             const impact = Math.max(0,-relative.dot(normal));
-            p.y = top+s.extent.y;
+            const priorY=p.y;p.y = top+s.extent.y;
+            updateDamageEnergy(s,priorY);
             s.contacts++;
             s.supportId = landing ? landing.id : null; s.supportTop = top;
             if (impact > 1.3 && s.contacts <= 3) events.push({
@@ -456,6 +562,7 @@ vec3 fragmentRotate(vec3 p, vec4 q) {
             s.grounded = rebound < .35; s.stableTime = 0;
             v.copy(surfaceVelocity).add(relative);
             if (!s.grounded) v.addScaledVector(normal,rebound);
+            updateDamageEnergy(s,p.y);
             s.surfaceVelocity.copy(surfaceVelocity);
           }
           writePose(s);
@@ -475,6 +582,7 @@ vec3 fragmentRotate(vec3 p, vec4 q) {
         s.position.copy(s.restCenter); s.quaternion.identity(); s.extent.copy(s.half);
         s.velocity.set(0,0,0); s.angular.set(0,0,0); s.angularTime = 0;
         s.grounded = false; s.stableTime = 0; s.deposited = false; s.surfaceVelocity.set(0,0,0);
+        s.wallContacts.clear();s.damageEnergy=0;
         writePose(s);
       }
       for (const mesh of batches) mesh.visible = false;
@@ -499,7 +607,7 @@ vec3 fragmentRotate(vec3 p, vec4 q) {
       }
       return result;
     }
-    return { prepare, release, step, render, reset, setQuality, stats, sample, groundHeight, quietTail };
+    return { prepare, release, step, render, reset, setQuality, stats, sample, groundHeight, quietTail, setCollider };
   }
   window.SkyfallStructuralFragments = { create };
 })();

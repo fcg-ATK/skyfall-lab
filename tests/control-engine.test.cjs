@@ -13,9 +13,9 @@ test('control: damage follows visible displacement rather than active flags or s
  g.fracturePart(p);g.updateDamage();assert.equal(p.crumbleProgress,1);g.reset();g.updateDamage();assert.equal(g.damage,0);
 });
 test('control: half the building visibly displaced reports forty percent and surviving blocks prevent false100',async()=>{
- const g=await engine();for(const p of g.parts.slice(0,24)){p.node.position.y-=2;p.phase='resting';}g.updateDamage();assert.equal(g.damage,40);
- for(const p of g.parts.slice(0,47))g.fracturePart(p);g.parts[47].node.position.y-=2;g.updateDamage();assert.equal(g.damage,99);
- g.fracturePart(g.parts[47]);g.updateDamage();assert.equal(g.damage,100);
+ const g=await engine();for(const p of g.parts.slice(0,g.parts.length/2)){p.node.position.y-=2;p.phase='resting';}g.updateDamage();assert.equal(g.damage,40);
+ for(const p of g.parts.slice(0,-1))g.fracturePart(p);g.parts.at(-1).node.position.y-=2;g.updateDamage();assert.equal(g.damage,99);
+ g.fracturePart(g.parts.at(-1));g.updateDamage();assert.equal(g.damage,100);
 });
 test('control: empty aim blocks all weapons before consuming ammunition',async()=>{
  const g=await engine();g.aim.height=30;const aim={...g.aim};

@@ -102,7 +102,7 @@ T.GLTFLoader.prototype.loadAsync = async function (url) {
 };
 if (fs.existsSync(path.join(root, 'environment.js')))
   vm.runInContext(fs.readFileSync(path.join(root, 'environment.js'), 'utf8'), context);
-for (const file of ['collapse-solver.js','structural-fragments.js', 'target-highlight.js', 'powder.js', 'impact-fx.js']) if (fs.existsSync(path.join(root, file)))
+for (const file of ['collapse-solver.js','fragment-contact.js','structural-fragments.js', 'structure-detail.js', 'target-highlight.js', 'powder.js', 'impact-fx.js']) if (fs.existsSync(path.join(root, file)))
   vm.runInContext(fs.readFileSync(path.join(root, file), 'utf8'), context);
 vm.runInContext(fs.readFileSync(path.join(root, 'loading.js'), 'utf8'), context);
 vm.runInContext(fs.readFileSync(path.join(root, 'engine.js'), 'utf8'), context);

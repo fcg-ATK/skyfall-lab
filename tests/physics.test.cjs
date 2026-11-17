@@ -55,13 +55,13 @@ test('upper-floor blast cannot reach unrelated lower floors', () => {
   for (const weapon of ['rocket', 'meteor', 'ball']) {
     const result = collapsePlan(building, ['f4c2'], weapon);
     assert.ok(result.length > 0);
-    assert.ok(result.every(p => building.find(b => b.id === p.id).floor >= (weapon==='rocket'?2:4)));
+    assert.ok(result.every(p => building.find(b => b.id === p.id).floor >= (weapon==='rocket'?2:weapon==='meteor'?3:4)));
   }
 });
-test('a base blast plans only local struck-storey fracture, not a timed upper wave', () => {
+test('a base meteor blast is limited to its nearby volume and neighboring storey', () => {
   const result = collapsePlan(building, ['f0c0'], 'meteor');
   assert.ok(result.length > 1);
-  assert.ok(result.every(p=>p.id.startsWith('f0')), 'upper motion must come from current support, never a preset timer');
+  assert.ok(result.every(p=>building.find(b=>b.id===p.id).floor<=1), 'remote upper motion must come from current support');
 });
 
 test('a local impact tears across a storey instead of releasing it as one synchronized ring', () => {
@@ -70,12 +70,27 @@ test('a local impact tears across a storey instead of releasing it as one synchr
   assert.ok(Math.max(...base)-Math.min(...base)>.03 && Math.max(...base)<.5,'farther members must visibly follow the contact zone');
 });
 test('weapon radii resolve distinct nearby centre distances despite overlapping AABBs', () => {
-  const targets=[0,4.2,4.2001,5.5,5.5001,6.5,6.5001].map((x,id)=>({id,floor:0,center:v(x),halfExtents:v(10,1,10)}));
+  const targets=[0,4.1,4.1001,6.2,6.2001].map((x,id)=>({id,floor:0,center:v(x),halfExtents:v(10,1,10)}));
   // Every AABB contains the hit centre, including members just outside each
   // configured radius. Only centre distance may select the lateral blast.
-  for(const [weapon,expected] of Object.entries({rocket:[0,1],meteor:[0,1,2,3],ball:[0,1,2,3,4,5]})){
+  for(const [weapon,expected] of Object.entries({rocket:[0,1],meteor:[0,1,2,3],ball:[0]})){
     assert.deepEqual(collapsePlan(targets,[0],weapon).map(p=>p.id),expected,`${weapon}: include the exact radius and reject the next outside centre`);
   }
+});
+test('rocket widens the contacted storey locally without reaching remote corners or neighboring floors', () => {
+  const targets = [
+    { id: 'hit', floor: 2, center: v(10, 8, 10) },
+    { id: 'near-side', floor: 2, center: v(13.43, 8, 10) },
+    { id: 'front-edge', floor: 2, center: v(10, 8, 13.4) },
+    { id: 'past-front', floor: 2, center: v(10, 8, 13.401) },
+    { id: 'corner', floor: 2, center: v(13.43, 8, 13) },
+    { id: 'above', floor: 3, center: v(10, 11, 10) },
+    { id: 'below', floor: 1, center: v(10, 5, 10) },
+  ].map(p => ({ ...p, halfExtents: v(20, 1.5, 20) }));
+  const ids = collapsePlan(targets, ['hit'], 'rocket', () => .5, v(10, 8, 10)).map(p => p.id).sort();
+  assert.deepEqual(ids, ['front-edge', 'hit', 'near-side']);
+  const offset = collapsePlan(targets, ['hit'], 'rocket', () => .5, v(6, 8, 10)).map(p => p.id);
+  assert.deepEqual(offset, ['hit'], 'actual contact moves the blast origin; overlapping bounds must not inflate it');
 });
 test('detached remote upper pieces do not collapse through nonexistent support', () => {
   const remote = { id: 'remote', floor: 1, center: v(200, 5, 200), halfExtents: v(2, 1, 2) };

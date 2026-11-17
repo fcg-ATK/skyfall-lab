@@ -19,12 +19,21 @@ test('actual roof sector cannot float across a full wide bay after its own lower
  assert.ok(parts.filter(p=>p.floor===5&&p.id!==41).every(p=>!p.active&&p.node.position.y===p.rest.y),'directly supported roof sectors stay in place');
  assert.ok(!solver.diagnostics()[5].bridged.includes(41));
 });
-test('a genuine two-metre span bridges between current opposing bearings and releases when one anchor disappears',()=>{
- const {parts,solver}=shortSpan();parts[1].gone=true;step(solver);
- assert.equal(parts[4].active,false);assert.ok(solver.diagnostics()[1].bridged.includes(4));
- parts[3].gone=true;step(solver);
- assert.ok(parts[4].active&&parts[4].node.position.y<parts[4].rest.y);
- assert.equal(parts[5].active,false);
+test('a two-metre bridge holds until anchor loss pulls its immediate bearing neighbor but preserves the next supported bay',()=>{
+ // Four bays distinguish the immediately connected remaining anchor from a
+ // healthy second-ring bay. The extra bay has its own unchanged lower bearing.
+ const {parts,solver}=make(Array.from({length:8},(_,id)=>({id,floor:Math.floor(id/4),cell:id%4,center:{x:(id%4)*2,y:1.5+Math.floor(id/4)*3,z:0},halfExtents:{x:1,y:1.5,z:1}})),[0,3,6]);
+ parts[1].gone=true;step(solver);
+ assert.ok(solver.diagnostics()[1].bridged.includes(5));
+ assert.ok(parts.filter(p=>p.floor===1).every(p=>!p.active&&!p.gone&&p.node.position.y===p.rest.y),'both current opposing anchors preserve the whole bridge before anchor loss');
+ parts[4].gone=true;step(solver);
+ assert.ok(parts[5].active&&parts[5].node.position.y<parts[5].rest.y,'the slab releases after losing one real anchor');
+ assert.ok(parts[6].active&&!parts[6].gone&&Math.hypot(parts[6].node.position.x-parts[6].rest.x,parts[6].node.position.y-parts[6].rest.y)>1e-4,'the eccentric connected slab pulls its immediate intact bearing neighbor');
+ assert.ok(Math.hypot(parts[6].node.quaternion.x,parts[6].node.quaternion.z)>1e-5,'the recruited neighbor actually rotates before fragmenting');
+ for(const axis of ['x','y','z','w'])assert.ok(Math.abs(parts[5].node.quaternion[axis]-parts[6].node.quaternion[axis])<1e-8,'the newly released cells briefly remain one coherent patch');
+ assert.ok(!parts[7].active&&!parts[7].gone&&parts[7].node.position.x===parts[7].rest.x&&parts[7].node.position.y===parts[7].rest.y,'the next healthy supported bay stays in place instead of joining a global release');
+ const remote=solver.assessPart(parts[7]);
+ assert.equal(remote.anchored,true);assert.deepEqual(remote.supportIds,[3]);
 });
 for(const shift of [{x:0,y:-1,z:0},{x:20,y:0,z:0}])test(`inactive original bearing moved by ${JSON.stringify(shift)} cannot hold a floating member`,()=>{
  const {parts,solver}=shortSpan();

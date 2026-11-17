@@ -103,23 +103,24 @@
       filter.frequency.exponentialRampToValueAtTime(to, now + duration);
       this.voice(source, [filter], duration, volume, delay, debris ? .025 : .002);
     }
-    tone(duration, volume, from, to, type = 'sine', delay = 0) {
+    tone(duration, volume, from, to, type = 'sine', delay = 0, attack = .004) {
       const source = this.context.createOscillator(), now = this.context.currentTime + delay;
       source.type = type; source.frequency.setValueAtTime(from, now);
       source.frequency.exponentialRampToValueAtTime(to, now + duration);
-      this.voice(source, [], duration, volume, delay);
+      this.voice(source, [], duration, volume, delay, attack);
     }
     play(kind, data = {}) {
       if (kind === 'reset') { this.reset(); return; }
       if (this.blocked || !this.context) return;
-      if (!['launch', 'impact', 'penetration', 'fracture', 'floorImpact'].includes(kind)) return;
+      if (!['launch', 'impact', 'penetration', 'fracture', 'strain', 'floorImpact'].includes(kind)) return;
+      if (kind === 'strain' && (!Number.isFinite(data.energy ?? 1) || (data.energy ?? 1) <= 0)) return;
       if (this.context.state !== 'running') {
         if (this.resuming && this.pending.length < 4) this.pending.push([kind, data]);
         return;
       }
       const now = this.context.currentTime, floor = data.floor ?? 'global';
-      const key = kind + ':' + (kind === 'fracture' || kind === 'floorImpact' ? floor : 'weapon');
-      const cooldown = kind === 'floorImpact' ? .28 : kind === 'fracture' ? .085 : kind === 'penetration' ? .075 : .06;
+      const key = kind + ':' + (kind === 'fracture' || kind === 'floorImpact' || kind === 'strain' ? floor : 'weapon');
+      const cooldown = kind === 'strain' ? .55 : kind === 'floorImpact' ? .28 : kind === 'fracture' ? .085 : kind === 'penetration' ? .075 : .06;
       if (now - (this.lastEvents.get(key) ?? -Infinity) < cooldown) return;
       // Reap old keys so unknown floor identifiers cannot grow this map indefinitely.
       for (const [entry, time] of this.lastEvents) if (now - time > 2) this.lastEvents.delete(entry);
@@ -144,8 +145,8 @@
             this.tone(.62, .29, 79, 33); this.tone(.52, .17, 193, 148, 'triangle');
             this.tone(.31, .08, 409, 310); this.noiseHit(.24, .19, 2100, 220);
           } else {
-            this.noiseHit(.13, .23, 3800, 900, 'highpass');
-            this.noiseHit(.8, .28, 1700, 80); this.tone(.76, .34, 116, 31);
+            this.noiseHit(.09, .25, 3800, 900, 'highpass');
+            this.noiseHit(.44, .28, 1700, 100); this.tone(.43, .34, 116, 36);
           }
         } else if (kind === 'penetration') {
           this.noiseHit(.18, .12, weapon === 'meteor' ? 900 : 2600, 260, 'bandpass');
@@ -153,8 +154,14 @@
         } else if (kind === 'fracture') {
           this.noiseHit(.12, .105 * energy, 4400, 1400, 'bandpass');
           this.noiseHit(.2, .095 * energy, 850, 140);
+        } else if (kind === 'strain') {
+          // A quiet short bend/grind marks actual loss of bearing. The long
+          // rumble belongs to later collisions, not an invented collapse timer.
+          this.tone(.36, .045 * energy, 148, 83, 'triangle', 0, .04);
+          this.noiseHit(.32, .065 * energy, 630, 180, 'bandpass', true);
         } else if (kind === 'floorImpact') {
-          this.tone(.64, .20 * energy, 83, 29);
+          this.tone(.38, .17 * energy, 83, 38);
+          this.tone(1.3, .18 * energy, 57, 27, 'sine', .075, .095);
           this.noiseHit(.23, .16 * energy, 850, 100);
           this.noiseHit(1.03, .19 * energy, 1900, 320, 'bandpass', true, .035);
         }

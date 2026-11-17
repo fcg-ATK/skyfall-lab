@@ -152,12 +152,53 @@
       });
       onProgress({ stage: '正在准备建筑碎裂与碰撞…' });
       await new Promise(resolve => setTimeout(resolve, 0));
-      this.structuralFragments.prepare(this.parts, JSON.parse(new TextDecoder().decode(fragmentDescription)), fragmentBuffer);
+      const fragmentData = JSON.parse(new TextDecoder().decode(fragmentDescription));
+      const detailed = window.SkyfallStructureDetail.refine(this.parts, fragmentData, fragmentBuffer, this.model, {
+        floorHeights: this.manifest.floorHeights,
+      });
+      this.parts = detailed.parts;
+      this.structureDetail = detailed.rendering;
+      this.structureDetail.setQuality(this.profile);
+      this.structuralFragments.prepare(this.parts, detailed.descriptor, fragmentBuffer);
       this.targetHighlight = window.SkyfallTargetHighlight.create(this.parts);
+      this.fragmentContact = window.SkyfallFragmentContact.create(this.parts);
+      this.wallContactSamples = new Map();
+      const sampleDirections = [];
+      for (const x of [-1,0,1]) for (const y of [-1,0,1]) for (const z of [-1,0,1])
+        if (x || y || z) sampleDirections.push(new T.Vector3(x,y,z));
+      for (const part of this.parts) {
+        const vertices = [], samples = [], keys = new Set();
+        part.node.traverse(mesh => {
+          if (!mesh.isMesh) return;
+          mesh.updateMatrix();
+          const positions = mesh.geometry.attributes.position;
+          for (let index=0; index<positions.count; index++)
+            vertices.push(new T.Vector3().fromBufferAttribute(positions,index).applyMatrix4(mesh.matrix));
+        });
+        const retain = point => {
+          const key = point.toArray().map(value=>value.toFixed(4)).join(',');
+          if (!keys.has(key)) { keys.add(key); samples.push(point); }
+        };
+        for (const axis of sampleDirections) {
+          let extreme=null, best=-Infinity;
+          for (const vertex of vertices) { const dot=vertex.dot(axis); if (dot>best) { best=dot; extreme=vertex; } }
+          if (extreme) retain(extreme);
+        }
+        for (let index=0; index<4; index++) {
+          const first=Math.floor((vertices.length/3-1)*index/3)*3;
+          if (vertices[first+2]) retain(vertices[first].clone().add(vertices[first+1]).add(vertices[first+2]).multiplyScalar(1/3));
+        }
+        this.wallContactSamples.set(part.id,samples);
+      }
+      this.structuralFragments.setCollider(this.fragmentContact,event=>this.fragmentImpact(event));
       this.collapse=window.SkyfallCollapse.create(this.parts,{
         floorHeights:this.manifest.floorHeights,
         groundAt:(x,z)=>this.structuralFragments.groundHeight?.(x,z)??.24,
         activate:p=>this.breakPart(p),
+        onRelease:event=>this.structuralRelease(event),
+        contactSamples:part=>this.wallContactSamples.get(part.id)||[],
+        contactCandidates:(bounds,query)=>this.fragmentContact.candidates(bounds,query),
+        sweepContact:(from,to,options)=>this.fragmentContact.sweep(from,to,options),
         fracture:(p,contact)=>{p.fractureCause=contact.cause||'compression';p.crushEnergy=contact.energy;p.hitPoint=new T.Vector3(contact.point.x,contact.point.y,contact.point.z);this.fracturePart(p);this.landing({point:p.hitPoint,partId:p.id,floor:p.floor,energy:contact.energy});}
       });
       this.reset(); this.loaded = true;
@@ -165,6 +206,7 @@
     setQuality(mode) {
       this.quality = mode; this.profile = P.qualityProfile(mode); this.renderer.shadowMap.enabled = this.profile.shadows;
       this.environment?.setQuality(this.profile);
+      this.structureDetail?.setQuality(this.profile);
       this.powder?.setQuality(this.profile); this.impactFX?.setQuality(this.profile);this.structuralFragments?.setQuality(this.profile);
       this.renderer.shadowMap.needsUpdate = true; this.resize();
       if (this.dust) this.dust.splice(this.profile.dust);
@@ -179,10 +221,10 @@
     resetCamera() { Object.assign(this.orbit, { yaw: 0.68, pitch: 0.3, distance: 66, height: 10 }); }
     reset() {
       this.targetHighlight?.update(false); this.targetHighlightPaused = false;
-      this.state = 'ready'; this.time = 0; this.watchTime = 0; this.stillTime = 0; this.damageQuietTime = 0; this.score = 0; this.damage = 0; this.shots = 0; this.maxShots = 4; this.ammoBonus = 0; this.plan = [];
+      this.state = 'ready'; this.time = 0; this.watchTime = 0; this.stillTime = 0; this.damageQuietTime = 0; this.score = 0; this.damage = 0; this.shots = 0; this.maxShots = this.freeMode ? Infinity : 4; this.ammoBonus = 0; this.plan = [];
       this.shotHits=[];this.shotFractures=[];this.shotStartDamage=0;this.lastDamageProgress=0;
       this.slow = 0; this.hitStop = 0; this.shake = 0; this.effectTime = 0; this.projectile.visible = false; this.shot = null; this.flash.intensity = 0;
-      this.floorBeats=new Map();this.landingBeats=new Map();this.collapse?.reset();this.structuralFragments?.reset();this.powder?.reset();this.impactFX?.reset();this.onEvent('reset');
+      this.floorBeats=new Map();this.landingBeats=new Map();this.releaseBeats=new Map();this.collapse?.reset();this.structuralFragments?.reset();this.powder?.reset();this.impactFX?.reset();this.onEvent('reset');
       this.fragments.length = 0; this.dust.length = 0;
       this.rubble.length = 0;
       this.rings.forEach(r => { r.mesh.visible = false; r.age = 10; });
@@ -314,7 +356,7 @@
       this.projectileCore.material.metalness = weapon === 'ball' ? 0.85 : 0.1;
       this.flame.position.set(0, 0, weapon === 'meteor' ? 1.1 : 1.65); this.flame.scale.set(0.4, 0.4, weapon === 'meteor' ? 4 : 1.6);
       this.projectile.visible = true; this.guide.visible = false;
-      this.shot = { dir, speed: weapon === 'meteor' ? 62 : weapon === 'rocket' ? 78 : 48, traveled: 0, hit: false, penetrated: new Set(), emit: 0, stopped: false, exitBurst: false };
+      this.shot = { dir, speed: weapon === 'meteor' ? 62 : weapon === 'rocket' ? 78 : 48, traveled: 0, hit: false, penetrated: new Set(), maxContacts: weapon === 'ball' ? 2 : 1, emit: 0, stopped: false, exitBurst: false };
       this.shots++; this.state = 'flight'; this.syncTargetHighlight(); this.watchTime = 0; this.stillTime = 0; this.onEvent('launch', { weapon, shots: this.shots }); return true;
     }
     pick(x, y) {
@@ -407,13 +449,12 @@
       this.powder.emit(point,{direction:this.shot.dir,energy:power*scale,count:Math.round(150*power*scale),spread:1.2,falling:false});
     }
     impact(point, part) {
-      const shot = this.shot; if (shot.penetrated.has(part.id)) return;
+      const shot = this.shot; if (shot.stopped || part.gone || shot.penetrated.has(part.id)) return;
       shot.penetrated.add(part.id);
       const first = !shot.hit; shot.hit = true;
       this.shotHits.push(part.id);
-      // Every distinct structural member on the real swept path takes a hit,
-      // including the exit side. The penetrated set deduplicates its triangles;
-      // only the first contact below schedules a surrounding blast.
+      // Surface triangles are deduplicated per structural member. Explosive
+      // projectiles detonate on entry; the ball can punch through one more member.
       part.fractureCause=first?'impact':'penetration';
       const power = this.weapon === 'meteor' ? 2.3 : this.weapon === 'rocket' ? 1.6 : 0.9;
       part.direct = true; part.hitPoint=point.clone();
@@ -422,10 +463,17 @@
       else if(!shot.exitBurst && point.distanceTo(shot.entryPoint)>3) { shot.exitBurst=true; this.explode(point,power,.45); this.onEvent('penetration',{weapon:this.weapon}); }
       else { this.addFragments(point, 5, power*.6, false, shot.dir); }
       // Only real triangle contact starts damage. The local blast then reaches nearby supports.
-      const plan = first ? P.collapsePlan(this.parts.filter(p=>!p.gone||p===part).map(p=>({...p,center:p.node.position})), [part.id], this.weapon, Math.random) : [];
+      const plan = first ? P.collapsePlan(this.parts.filter(p=>!p.gone||p===part).map(p=>({...p,center:p.node.position})), [part.id], this.weapon, Math.random, point) : [];
       for (const entry of plan) {
         const p = this.parts.find(p => p.id === entry.id); if (!p || p.active) continue;
         p.delay = Math.min(p.delay, this.time + entry.delay);p.blast=true;
+      }
+      if (shot.penetrated.size >= shot.maxContacts) {
+        shot.stopped = true; shot.stopTime = this.time;
+        this.projectile.position.copy(point);
+        this.projectile.visible = this.weapon === 'ball';
+      } else {
+        shot.speed *= 0.68;
       }
     }
     breakPart(p) {
@@ -469,6 +517,47 @@
       }
       this.damage=cleared?100:Math.min(99,this.parts.length?Math.round(total/this.parts.length*100):0);
       return total;
+    }
+    fragmentImpact(event) {
+      const blocked={broken:false,spentEnergy:0};
+      if (event?.type!=='fragment-wall'||this.state==='finished') return blocked;
+      const target=this.parts.find(part=>part.id===event.targetPartId);
+      if (!target||target.gone||target.id===event.sourcePartId||!target.node.visible) return blocked;
+      if (![event.mass,event.normalSpeed,event.kineticEnergy].every(Number.isFinite)
+          ||event.mass<12||event.normalSpeed<3||event.kineticEnergy<=0
+          ||!event.point||!['x','y','z'].every(axis=>Number.isFinite(event.point[axis]))) return blocked;
+      const normal=event.normal||{x:0,y:0,z:1},half=target.halfExtents;
+      // Floor compression is already resolved by the connected architecture.
+      // Child rubble underneath it cannot apply that same falling mass twice.
+      if (Math.abs(normal.y)>=.8) return blocked;
+      const area=4*half.y*(Math.abs(normal.x)>Math.abs(normal.z)?half.z:half.x);
+      const resistance=clamp(area*700,6000,16000);
+      const incoming=event.velocity;
+      if (!incoming||!['x','y','z'].every(axis=>Number.isFinite(incoming[axis]))) return blocked;
+      const flightSpeed=Math.max(0,-incoming.x*normal.x-incoming.y*normal.y-incoming.z*normal.z);
+      // A moving wall can sweep into resting rubble. Its own motion is already
+      // handled by the architectural solver and cannot power a second projectile.
+      const reserve=Number.isFinite(event.availableEnergy)?Math.max(0,event.availableEnergy):event.kineticEnergy;
+      const incomingWork=Math.min(event.kineticEnergy,.5*event.mass*flightSpeed*flightSpeed,reserve);
+      if (incomingWork<resistance) return blocked;
+      target.direct=false;target.fractureCause='fragment-impact';
+      target.hitPoint=new T.Vector3(event.point.x,event.point.y,event.point.z);
+      target.crushEnergy=Math.min(5,event.normalSpeed);
+      this.fracturePart(target);
+      if (!target.gone) return blocked;
+      this.landing({point:target.hitPoint,partId:target.id,floor:target.floor,energy:Math.min(2,event.normalSpeed/5)});
+      return {broken:true,spentEnergy:resistance};
+    }
+    structuralRelease(event) {
+      if(this.state==='finished')return;
+      const last=this.releaseBeats.get(event.floor)??-Infinity;
+      if(this.time-last<.35)return;
+      this.releaseBeats.set(event.floor,this.time);
+      const energy=clamp(.45+Math.sqrt(Math.max(1,event.mass||1))*.13,.45,1.2);
+      // The solver supplies the real separating connection. This dust/creak
+      // marks the loss of support without scheduling any additional damage.
+      this.impactFX.structuralRelease({point:event.point,direction:event.direction,energy});
+      this.onEvent('strain',{weapon:this.weapon,floor:event.floor,kind:event.kind,energy});
     }
     landing(event) {
       // Granular rubble adds sound/dust, not a second structural damage path.
@@ -521,7 +610,7 @@
             if(shot.stopped)break;
           }
           if (!shot.stopped) this.projectile.position.copy(next);
-          shot.traveled += distance;
+          shot.traveled += shot.stopped ? old.distanceTo(this.projectile.position) : distance;
           shot.emit += dt;
           if (this.weapon !== 'ball' && shot.emit > 0.045) { shot.emit = 0; this.addDust(this.projectile.position, 1, .35, true); }
           if (shot.traveled > 115 || next.y < 0) {
@@ -534,9 +623,11 @@
       // Only a local blast has a brief propagation schedule. All upper motion
       // and secondary failure come from live support and physical contact.
       for(const p of this.parts)if(!p.gone&&p.blast&&this.time>=p.delay){p.direct=true;p.fractureCause='blast';this.fracturePart(p);}
+      this.fragmentContact?.sync();
       if(this.state!=='finished'&&this.collapse.step(dt))this.renderer.shadowMap.needsUpdate=true;
       this.updateDamage();
       this.powder.step(dt);
+      this.fragmentContact?.sync();
       const movingBefore=this.structuralFragments.stats().moving;
       for(const event of this.structuralFragments.step(dt,this.supports()))this.landing(event);
       if(movingBefore || this.structuralFragments.stats().moving)this.renderer.shadowMap.needsUpdate=true;
@@ -567,7 +658,7 @@
           const cleared=this.parts.length>0&&this.parts.every(p=>p.gone);
           const report={score:this.score,damage:this.damage,shotDamage:this.damage-this.shotStartDamage,shots:this.shots,remainingAmmo:this.remainingAmmo,cleared};
           if(cleared||this.remainingAmmo===0){
-            if(cleared&&!this.ammoBonus){this.ammoBonus=this.remainingAmmo*300;this.score+=this.ammoBonus;}
+            if(cleared&&!this.ammoBonus){this.ammoBonus=Number.isFinite(this.remainingAmmo)?this.remainingAmmo*300:0;this.score+=this.ammoBonus;}
             this.state='finished';this.onEvent('finished',{...report,score:this.score,ammoBonus:this.ammoBonus,canContinue:false});
           }else{
             this.state='ready';this.projectile.visible=false;this.guide.visible=true;this.slow=0;this.hitStop=0;this.recoverAim();this.refreshAimValidity();
@@ -620,6 +711,7 @@
       this.dustMesh.instanceMatrix.needsUpdate = true; this.dustAlpha.needsUpdate = true; this.dustColor.needsUpdate = true;
       this.impactFX.render(this.camera);
       this.powder.render(this.camera,this.canvas.clientHeight||innerHeight,this.renderer.getPixelRatio?.()||1);
+      this.structureDetail?.update();
       this.structuralFragments.render();
       this.renderer.render(this.scene, this.camera);
     }
