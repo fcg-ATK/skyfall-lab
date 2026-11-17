@@ -429,27 +429,46 @@ test('every refined cell releases original fragment geometry exactly once', asyn
 
 test('actual small fragments persist at rest while late chips finish moving', async () => {
   const game = await engine(); game.aim.height = 1; game.fire('meteor');
+  const allPieces=()=>Array.from(game.structuralFragments.sample(null,game.structuralFragments.stats().pieceCount));
+  const cohort=()=>{
+    const pieces=allPieces(),stats=game.structuralFragments.stats(),ids=new Set(pieces.map(p=>p.id));
+    assert.equal(pieces.length,stats.active,'every active piece must be exposed by the full sample');
+    assert.equal(ids.size,stats.active,'active source IDs must remain unique');
+    assert.equal(stats.settled+stats.moving,stats.active,'every active source fragment stays accounted for');
+    return {pieces,ids,gone:new Set(game.parts.filter(p=>p.gone).map(p=>p.id)),fractures:game.shotFractures.length};
+  };
+  const assertPreserved=(before,after)=>{
+    assert.deepEqual([...before.ids].filter(id=>!after.ids.has(id)),[],
+      'settling must preserve every retained source fragment ID');
+    const newFractures=new Set(game.shotFractures.slice(before.fractures,after.fractures).map(f=>f.id));
+    for(const piece of after.pieces.filter(p=>!before.ids.has(p.id))){
+      assert.ok(!before.gone.has(piece.partId)&&after.gone.has(piece.partId)&&newFractures.has(piece.partId),
+        'additional pieces must come from an actual newly fractured parent');
+    }
+  };
   advance(game, 12); game.render();
-  const retained = game.structuralFragments.stats().active;
-  assert.ok(retained > 300, 'twelve seconds must retain many actual PC pieces');
+  const retained=cohort();
+  assert.ok(retained.ids.size > 300, 'twelve seconds must retain many actual PC pieces');
   // Actual wall contacts can leave chips sliding on rubble or supported on a
   // surviving wall. Ready requires stable architecture, not freezing all chips.
   for(let elapsed=12;elapsed<15&&game.structuralFragments.stats().moving;elapsed+=1/30)game.step(1/30);
   game.render();
-  const stats = game.structuralFragments.stats();
-  assert.equal(stats.active,retained,'settling must preserve every retained fragment');
+  const stats=game.structuralFragments.stats(),settling=cohort();
+  // Late chips may fracture another wall and add source pieces. Identity
+  // retention detects deleted/replaced rubble without forbidding that impact.
+  assertPreserved(retained,settling);
   assert.ok(game.parts.every(p=>p.gone||!p.active),'the surviving structure must be static');
   assert.ok(stats.settled>stats.moving,'the actual rubble pile must settle while the smaller tail continues');
   assert.equal(stats.settled+stats.moving,stats.active,'every retained source fragment stays accounted for');
   assert.ok(game.events.some(e => e.name === 'floorImpact'), 'real fragment landing must drive the impact feedback');
   assert.ok(!game.fallingDebris || game.fallingDebris.length === 0, 'no synthetic delayed landing queue may replace actual falling pieces');
-  const grounded=Array.from(game.structuralFragments.sample(null,stats.active)).filter(f=>f.settled&&f.supportId==null);
+  const grounded=settling.pieces.filter(f=>f.settled&&f.supportId==null);
   assert.ok(grounded.length>100,'a substantial pile of real grounded fragments must remain');
   const ids=new Set(grounded.map(f=>f.id));
-  const snapshot=()=>Array.from(game.structuralFragments.sample(null,stats.active)).filter(f=>ids.has(f.id))
+  const snapshot=()=>allPieces().filter(f=>ids.has(f.id))
     .map(f=>[f.id,...f.position.toArray(),...f.quaternion.toArray(),f.settled]);
   const before=snapshot();
   advance(game, 2); game.render();
   assert.deepEqual(snapshot(), before, 'settled source geometry must persist after the visual effects expire');
-  assert.equal(game.structuralFragments.stats().active, stats.active);
+  assertPreserved(settling,cohort());
 });
