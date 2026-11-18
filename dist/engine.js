@@ -477,7 +477,7 @@
         this.fragments.push({ p: pos, v: dir, r: new T.Euler(Math.random() * 4, Math.random() * 4, 0), spin: 2+Math.random() * 8, scale: glass ? .12 + Math.random() * .3 : .09 + Math.random() * .28, age: 0, glass, color: new T.Color(glass ? (i % 2 ? 0xc0e2ea : 0x47727b) : (i % 2 ? 0x8b887c : 0xb5ac98)) });
       }
     }
-    explode(point, power, scale, shot) {
+    explode(point, power, scale = 1, shot = this.shot) {
       this.flash.position.copy(point); this.flash.intensity = (shot.weapon==='ball'?35:180) * power * scale;
       this.shake = Math.max(this.shake, Math.min(1.8,power*.65*scale));
       this.impactFX.burst(point, shot.dir, shot.weapon, scale);

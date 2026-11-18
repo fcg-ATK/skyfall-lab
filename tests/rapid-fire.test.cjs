@@ -108,6 +108,43 @@ test('a destroyed aim gives emptyAim during collapse and permits an immediate ne
   assert.deepEqual(Array.from(game.activeShots), inFlight);
 });
 
+test('delayed blast fragments retain the original shot after another weapon hits', async () => {
+  const game = await freeGame();
+  game.orbit.yaw = 0.68;
+  assert.equal(game.fire('rocket'), true);
+  const rocket = game.shot;
+  // Sweep each shot to its real first contact in one step, keeping both impacts
+  // inside the time window before the first local blast propagates.
+  rocket.speed = 1200;
+  game.step(0.05);
+  const pending = new Set(game.parts.filter(part => part.blast && !part.gone));
+  assert.ok(rocket.hit && pending.size > 0);
+
+  let delayedRelease;
+  const release = game.structuralFragments.release;
+  game.structuralFragments.release = function (part, options) {
+    if (pending.has(part) && part.fractureCause === 'blast') {
+      delayedRelease = { weapon: options.weapon, direction: options.direction.clone(), shotId: part.fractureShot.id };
+    }
+    return release.call(this, part, options);
+  };
+
+  game.orbit.yaw = 1.57;
+  Object.assign(game.aim, { height: 21, angle: 0, x: 0, z: 0 });
+  assert.equal(game.fire('ball'), true);
+  const ball = game.shot;
+  assert.ok(!ball.dir.equals(rocket.dir));
+  ball.speed = 1200;
+  game.step(0.05);
+  assert.equal(ball.hit, true);
+  assert.equal(delayedRelease, undefined);
+
+  stepUntil(game, () => Boolean(delayedRelease), 30);
+  assert.equal(delayedRelease.weapon, 'rocket');
+  assert.ok(delayedRelease.direction.equals(rocket.dir));
+  assert.equal(delayedRelease.shotId, rocket.id);
+});
+
 test('reset cancels all in-flight shots and their impacts before starting a new round', async () => {
   const game = await freeGame();
   assert.equal(game.fire('ball'), true);
