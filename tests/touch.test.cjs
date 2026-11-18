@@ -75,12 +75,18 @@ async function boot(options = {}) {
       this.aimValid = true; const assisted = Boolean(options.assistedPick && this.autoAim);
       this.aimFeedback = assisted ? 'assisted' : 'valid'; this.onEvent('aimSelected', { assisted }); return true;
     }
-    fire(value) { if (this.state !== 'ready') return; if (options.emptyAim) { this.onEvent('emptyAim'); return false; } this.fires.push(value); this.shots++; this.remainingAmmo--; this.state = 'flying'; this.onEvent('launch'); }
-    shotFinished({ score, damage, shotDamage, limits, aim }) {
+    get canAim() { return this.loaded && this.state !== 'finished' && (this.freeMode || this.state === 'ready'); }
+    fire(value) {
+      if (!this.canAim || this.aimTween) return false;
+      if (options.emptyAim || !this.aimValid) { this.onEvent('emptyAim'); return false; }
+      this.fires.push(value); this.shots++; this.remainingAmmo--;
+      this.state = 'flight'; this.onEvent('launch', {weapon: value}); return true;
+    }
+    shotFinished({ score, damage, shotDamage, limits, aim, volleyShots = 1 }) {
       this.state = 'ready'; this.score = score; this.damage = damage;
       if (limits) this.limits = limits;
       if (aim) this.aim = aim;
-      this.onEvent('shotFinished', { score, damage, shotDamage, shots: this.shots, remainingAmmo: this.remainingAmmo, canContinue: true });
+      this.onEvent('shotFinished', { score, damage, shotDamage, volleyShots, shots: this.shots, remainingAmmo: this.remainingAmmo, canContinue: true });
     }
     finish({ score, damage, cleared = false, ammoBonus = 0 }) {
       this.state = 'finished'; this.score = score; this.damage = damage; this.ammoBonus = ammoBonus;
@@ -250,6 +256,32 @@ test('shot settlement updates the HUD without a modal or focus change and the ne
   h.engine.shotFinished({ score: 2600, damage: 61, shotDamage: 28 });
   assert.match(h.get('status').textContent, /本发拆除28% · 累计61% · 已用2发/);
   assert.equal(h.get('result').hidden, true); assert.equal(h.engine.resets, 0);
+});
+
+test('players can aim, switch weapons and fire during flight and collapse, with one combined damage report', async () => {
+  const h = await boot({ emptyPicks: [2] });
+  h.get('fire').click();
+  assert.equal(h.engine.state, 'flight');
+  assert.equal(h.get('fire').disabled, false);
+  h.get('meteor').click();
+  h.pointer('pointerdown', 1, 100, 160); h.pointer('pointerup', 1, 100, 160);
+  h.document.dispatch('keydown', { code: 'Space' });
+  assert.deepEqual(h.engine.fires, ['rocket', 'meteor']);
+
+  h.engine.state = 'watch'; h.engine.onEvent('impact', {weapon: 'rocket'});
+  h.get('ball').click();
+  assert.equal(h.get('height').disabled, false); assert.equal(h.get('angle').disabled, false);
+  h.get('height').dispatch('input', { target: { value: 6 } });
+  h.pointer('pointerdown', 2, 30, 30); h.pointer('pointerup', 2, 30, 30);
+  h.get('fire').click();
+  assert.equal(h.get('toast').textContent, '这里已经空了，换个位置试试');
+  assert.equal(h.engine.shots, 2); assert.equal(h.engine.state, 'watch');
+  h.pointer('pointerdown', 3, 120, 220); h.pointer('pointerup', 3, 120, 220);
+  h.get('fire').click();
+  assert.deepEqual(h.engine.fires, ['rocket', 'meteor', 'ball']);
+  h.engine.shotFinished({ score: 3400, damage: 53, shotDamage: 53, volleyShots: 3 });
+  assert.match(h.get('status').textContent, /本轮连续3发，共拆除53% · 累计53% · 已用3发/);
+  assert.equal(h.get('result').hidden, true); assert.equal(h.get('fire').disabled, false);
 });
 
 test('settlement refreshes slider bounds and preserves the engine retargeted aim on surviving geometry', async () => {
@@ -422,15 +454,15 @@ test('settlement reads back manual aim without moving it when the remaining roof
   assert.equal(Number(h.get('height').max), 8.5); assert.match(h.get('heightValue').textContent, /18.0 m.*高于残楼/);
 });
 
-test('assisted movement temporarily blocks fire and refreshes the final readout without another tap', async () => {
-  const h = await boot({ duringStep(engine) { engine.aim.height = 4.5; engine.aimTween = null; } });
+test('fire during assisted movement launches from the current aim without waiting for another tap', async () => {
+  const h = await boot();
   h.get('autoAimToggle').click(); h.get('fire').click();
   h.engine.aimTween = { elapsed: 0, duration: .2 };
+  h.engine.aim.height = 4.5;
   h.engine.shotFinished({ score: 1700, damage: 40, shotDamage: 40 });
-  assert.equal(h.get('fire').disabled, true); h.get('fire').click(); assert.equal(h.engine.fires.length, 1);
-  h.frame(1); h.frame(34);
   assert.equal(h.get('fire').disabled, false); assert.equal(h.get('heightValue').textContent, '4.5 m');
   h.get('fire').click(); assert.equal(h.engine.fires.length, 2);
+  assert.equal(h.engine.aimTween, null); assert.equal(h.engine.aim.height, 4.5);
 });
 
 test('enabling assistance requests recovery once and leaves valid or manually changed aim alone afterward', async () => {
@@ -446,7 +478,7 @@ test('enabling assistance requests recovery once and leaves valid or manually ch
 
 test('turning assistance off immediately cancels movement at its current position', async () => {
   const h = await boot({ recoverStartsTween: true }); h.get('autoAimToggle').click();
-  assert.equal(h.get('fire').disabled, true); assert.equal(h.get('autoAimToggle').disabled, false);
+  assert.equal(h.get('fire').disabled, false); assert.equal(h.get('autoAimToggle').disabled, false);
   h.engine.aim.height = 6.5; h.get('autoAimToggle').click();
   assert.equal(h.engine.autoAim, false); assert.equal(h.engine.aimTween, null);
   assert.equal(h.engine.aim.height, 6.5); assert.equal(h.get('fire').disabled, false);
@@ -468,12 +500,13 @@ test('manual target and camera input cancel assistance motion without scheduling
   }
 });
 
-test('empty taps immediately explain the miss and disable launch until a building is selected', async () => {
+test('empty taps keep fire available for guidance until a building is selected', async () => {
   const h = await boot({ emptyPicks: [1] }); const reads = h.engine.validityReads;
   h.pointer('pointerdown', 1, 20, 20); h.pointer('pointerup', 1, 20, 20);
   assert.equal(h.get('toast').hidden, false); assert.equal(h.get('toast').textContent, '点在空处了，点楼体');
-  assert.match(h.get('status').textContent, /重新瞄准/); assert.equal(h.get('fire').disabled, true);
-  assert.match(h.get('fire').innerHTML, /重新瞄准/); h.get('fire').click(); assert.equal(h.engine.shots, 0);
+  assert.match(h.get('status').textContent, /重新瞄准/); assert.equal(h.get('fire').disabled, false);
+  assert.match(h.get('fire').innerHTML, /发射/); h.get('fire').click(); assert.equal(h.engine.shots, 0);
+  assert.equal(h.get('toast').textContent, '这里已经空了，换个位置试试');
   assert.equal(h.engine.validityReads, reads, 'an empty pick must not validate the old target again');
   h.pointer('pointerdown', 2, 150, 200); h.pointer('pointerup', 2, 150, 200);
   assert.equal(h.get('fire').disabled, false); assert.equal(h.get('toast').hidden, true);
@@ -501,16 +534,22 @@ test('manual camera and slider changes refresh validity immediately while period
     assert.equal(h.engine.validityOptions.at(-1).manual, true, action + ' explicitly replaces the empty-tap target');
     h.engine.aimValid = false; h.frame(1); h.frame(501); h.frame(1001);
     assert.equal(h.engine.validityReads, before + 1, action + ' periodic HUD must not raycast');
-    assert.equal(h.get('fire').disabled, true);
+    assert.equal(h.get('fire').disabled, false);
   }
 });
 
-test('settlement refreshes an emptied firing corridor before enabling the next shot', async () => {
+test('after a corridor is destroyed, firing over the gap gives guidance until a surviving target is picked', async () => {
   const h = await boot(); h.get('fire').click(); const before = h.engine.validityReads;
   h.engine.aimValid = false; h.engine.shotFinished({ score: 1700, damage: 40, shotDamage: 40 });
-  assert.equal(h.engine.validityReads, before + 1); assert.equal(h.get('fire').disabled, true);
+  assert.equal(h.engine.validityReads, before + 1); assert.equal(h.get('fire').disabled, false);
   assert.equal(h.engine.validityOptions.at(-1).manual, false, 'settlement must preserve a rejected manual target');
-  assert.match(h.get('fire').innerHTML, /重新瞄准/); assert.equal(h.get('height').disabled, false);
+  assert.match(h.get('fire').innerHTML, /发射/); assert.equal(h.get('height').disabled, false);
+  const ammo = h.engine.remainingAmmo;
+  h.get('fire').click(); h.get('fire').click();
+  assert.equal(h.get('toast').textContent, '这里已经空了，换个位置试试');
+  assert.equal(h.engine.shots, 1); assert.equal(h.engine.remainingAmmo, ammo);
+  h.pointer('pointerdown', 1, 120, 180); h.pointer('pointerup', 1, 120, 180);
+  h.get('fire').click(); assert.equal(h.engine.shots, 2);
 });
 
 test('results show the next rating gap and a positive message for a true full clear', async () => {
@@ -526,7 +565,7 @@ test('results show the next rating gap and a positive message for a true full cl
 test('manual validity changes replace stale aim feedback together with the fire state', async () => {
   const options = { validAfterRefresh: true }; const h = await boot(options);
   options.validAfterRefresh = false; h.get('angle').dispatch('input', { target: { value: 8 } });
-  assert.equal(h.get('fire').disabled, true); assert.match(h.get('status').textContent, /重新瞄准/);
+  assert.equal(h.get('fire').disabled, false); assert.match(h.get('status').textContent, /重新瞄准/);
   h.engine.onEvent('aimEmpty'); options.validAfterRefresh = true;
   h.get('height').dispatch('input', { target: { value: 8 } });
   assert.equal(h.get('fire').disabled, false); assert.equal(h.get('toast').hidden, true);
@@ -552,7 +591,7 @@ test('finished assisted movement replaces stale warm-target guidance only after 
     h.engine.aimValid = false; h.engine.onEvent('aimEmpty'); h.get('autoAimToggle').click();
     assert.match(h.get('status').textContent, /暖色楼体/);
     h.frame(1); h.frame(34);
-    assert.equal(h.get('fire').disabled, !valid);
+    assert.equal(h.get('fire').disabled, false);
     if (valid) {
       assert.equal(h.get('status').textContent, '辅助瞄准已就绪 · 可发射');
       assert.equal(h.get('toast').hidden, true);
@@ -594,7 +633,7 @@ test('empty aim replaces stale support text with an invitation to select the rem
   const h = await boot({ emptyPicks: [1], supportInsight: { anchored: true, supportIds: [3], carriedIds: [] } });
   h.pointer('pointerdown', 1, 20, 20); h.pointer('pointerup', 1, 20, 20);
   assert.equal(h.get('supportHint').textContent, '点选残楼，查看它由哪里支撑');
-  assert.equal(h.get('supportGuide').hidden, false); assert.equal(h.get('fire').disabled, true);
+  assert.equal(h.get('supportGuide').hidden, false); assert.equal(h.get('fire').disabled, false);
   assert.match(html, /青色仍在承重 · 橙色承重吃紧/);
 });
 

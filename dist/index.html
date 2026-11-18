@@ -7,8 +7,8 @@
   <meta name="description" content="崩塌实验室：在手机上自由环绕建筑，选择火箭、陨石或铁球，观察每一次撞击引发的倒塌。">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-  <title>崩塌实验室 · 自由破坏版 v8.13.0</title>
-  <link rel="stylesheet" href="style.css?v=8.13.0">
+  <title>崩塌实验室 · 自由破坏版 v8.14.0</title>
+  <link rel="stylesheet" href="style.css?v=8.14.0">
 </head>
 <body>
   <svg class="icon-definitions" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
@@ -33,7 +33,7 @@
     <div class="screen-shade" aria-hidden="true"></div>
 
     <header class="topbar">
-      <div class="brand"><span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span><div><h1>崩塌实验室<span class="mobile-badge">移动版</span></h1><p>自由破坏 · 流畅优化</p></div></div>
+      <div class="brand"><span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span><div><h1>崩塌实验室<span class="mobile-badge">移动版</span></h1><p>自由破坏 · 连续发射</p></div></div>
       <div class="top-actions">
         <button id="qualityBtn" class="quiet-button quality" type="button" title="切换画质">画质：平衡</button>
         <button id="sound" class="icon-button" type="button" aria-label="切换音效" aria-pressed="true" title="切换音效"><svg><use href="#i-sound"/></svg></button>
@@ -98,8 +98,8 @@
         <span class="eyebrow">开始你的破坏实验</span><h2 id="helpTitle">换一个角度，看它倒下。</h2>
         <ol class="help-steps">
           <li><span class="step-number">01</span><div><h3>先观察</h3><p>单指拖动，360° 环绕建筑；双指捏合调远近，双指上下拖动升降视角。电脑可用鼠标拖动和滚轮。</p></div></li>
-          <li><span class="step-number">02</span><div><h3>再瞄准</h3><p>轻点建筑选择撞击处，绕楼改变发射方向。金色箭头指示轨迹，点「瞄准」可调高度和倾角，高度滑杆范围随残存楼体变化。默认保留你的手动瞄准点。点到空处会立即提示，瞄准圈变灰，发射按钮显示「重新瞄准」且不消耗弹药；需要重新瞄准时，仍可打的楼体会显示暖色提示，直接点选即可。可在「瞄准」面板开启「辅助瞄准」，帮助选择点击附近的有效楼体；默认关闭，也不会吸附到背景建筑或废墟。</p><p class="support-help">「承重提示」默认开启：点选楼体后，青色标记仍在承重的结构，橙色标记承重吃紧的位置。提示会说明下方支撑或上方承托关系；可在「瞄准」面板单独关闭。它反映当前简化结构状态，不保证一次命中就能全楼倒塌。</p></div></li>
-          <li><span class="step-number">03</span><div><h3>发射，再补上一击</h3><p>自由模式开放无限弹药。倒塌稳定后会自动准备下一发，保留破坏与得分，可换武器、重新瞄准后直接发射。全毁时结算；点「重建」开始新一轮。每破坏一块得100分，全毁获S级，拆除80%以上获A级、60%以上获B级，其余为C级。</p><p class="weapon-help">火箭：瞄准中下部承重列，含命中层最多连续切入三层，遇空隙停止。<br>陨石：接触后范围冲击，波及命中位置周围及相邻楼层。<br>铁球：沿轨迹最多穿透两处结构，适合局部开洞和精准补刀。</p></div></li>
+          <li><span class="step-number">02</span><div><h3>再瞄准</h3><p>轻点建筑选择撞击处，绕楼改变发射方向。金色箭头指示轨迹，点「瞄准」可调高度和倾角，高度滑杆范围随残存楼体变化。默认保留你的手动瞄准点。点到空处会立即提示，瞄准圈变灰，这时点「发射」会提示你换个位置，弹药和发射次数都不变；需要重新瞄准时，仍可打的楼体会显示暖色提示，直接点选即可。可在「瞄准」面板开启「辅助瞄准」，帮助选择点击附近的有效楼体；默认关闭，也不会吸附到背景建筑或废墟。</p><p class="support-help">「承重提示」默认开启：点选楼体后，青色标记仍在承重的结构，橙色标记承重吃紧的位置。提示会说明下方支撑或上方承托关系；可在「瞄准」面板单独关闭。它反映当前简化结构状态，不保证一次命中就能全楼倒塌。</p></div></li>
+          <li><span class="step-number">03</span><div><h3>发射，再补上一击</h3><p>自由模式开放无限弹药。上一发还在飞行或楼体正在倒塌时，可以点选新的位置、切换武器，直接发射下一发。全毁时结算；点「重建」开始新一轮。每破坏一块得100分，全毁获S级，拆除80%以上获A级、60%以上获B级，其余为C级。</p><p class="weapon-help">火箭：瞄准中下部承重列，含命中层最多连续切入三层，遇空隙停止。<br>陨石：接触后范围冲击，波及命中位置周围及相邻楼层。<br>铁球：沿轨迹最多穿透两处结构，适合局部开洞和精准补刀。</p></div></li>
         </ol>
         <div class="help-tip"><strong>觉得不够顺畅？</strong><span>点右上角画质，手动切换「平衡／省电／精细」，选择会自动保存。横屏可获得更宽的观察视野。</span></div>
       </div>
@@ -139,8 +139,8 @@
   <script src="collapse-solver.js?v=8.13.0"></script>
   <script src="target-highlight.js?v=8.13.0"></script>
   <script src="structure-detail.js?v=8.13.0"></script>
-  <script src="engine.js?v=8.13.0"></script>
+  <script src="engine.js?v=8.14.0"></script>
   <script src="audio.js?v=8.13.0"></script>
-  <script src="app.js?v=8.13.0"></script>
+  <script src="app.js?v=8.14.0"></script>
 </body>
 </html>

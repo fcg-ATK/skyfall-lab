@@ -80,7 +80,7 @@
       }
     }
     buildProjectile() {
-      this.projectile = new T.Group(); this.scene.add(this.projectile);
+      const mesh = new T.Group();
       const rock = new T.IcosahedronGeometry(1, 2), vertices = rock.attributes.position;
       for (let i = 0; i < vertices.count; i++) {
         const x = vertices.getX(i), y = vertices.getY(i), z = vertices.getZ(i);
@@ -88,23 +88,45 @@
         vertices.setXYZ(i, x * r, y * r, z * r);
       }
       rock.computeVertexNormals();
-      this.projectileCore = new T.Mesh(rock, new T.MeshStandardMaterial({ color: 0x28231f, roughness: 0.94, emissive: 0x9e2506, emissiveIntensity: .35 }));
-      this.projectile.add(this.projectileCore);
-      this.ballCore = new T.Mesh(new T.SphereGeometry(.85, 20, 14), new T.MeshStandardMaterial({ color: 0x686b6c, metalness: .92, roughness: .2, envMapIntensity: 1.3 }));
-      this.projectile.add(this.ballCore);
-      this.rocket = new T.Group();
+      const meteor = new T.Mesh(rock, new T.MeshStandardMaterial({ color: 0x28231f, roughness: 0.94, metalness: .1, emissive: 0x9e2506, emissiveIntensity: .4 }));
+      meteor.name = 'meteor'; meteor.scale.setScalar(1.2);
+      const ball = new T.Mesh(new T.SphereGeometry(.85, 20, 14), new T.MeshStandardMaterial({ color: 0x686b6c, metalness: .92, roughness: .2, envMapIntensity: 1.3 }));
+      ball.name = 'ball';
+      const rocket = new T.Group(); rocket.name = 'rocket';
       const body = new T.Mesh(new T.CylinderGeometry(0.14, 0.24, 2.1, 10), new T.MeshStandardMaterial({ color: 0xd7d6cc, metalness: 0.7, roughness: 0.28 }));
-      body.rotation.x = Math.PI / 2; this.rocket.add(body);
+      body.rotation.x = Math.PI / 2; rocket.add(body);
       const tip = new T.Mesh(new T.ConeGeometry(0.23, 0.8, 10), new T.MeshStandardMaterial({ color: 0xe98a35, metalness: 0.5, roughness: 0.3 }));
-      tip.rotation.x = -Math.PI / 2; tip.position.z = -1.3; this.rocket.add(tip);
-      const fins = new T.Mesh(new T.BoxGeometry(0.85, 0.055, 0.55), body.material); fins.position.z = 0.8; this.rocket.add(fins);
-      const fins2 = fins.clone(); fins2.rotation.z = Math.PI / 2; this.rocket.add(fins2); this.projectile.add(this.rocket);
+      tip.rotation.x = -Math.PI / 2; tip.position.z = -1.3; rocket.add(tip);
+      const fins = new T.Mesh(new T.BoxGeometry(0.85, 0.055, 0.55), body.material); fins.position.z = 0.8; rocket.add(fins);
+      const fins2 = fins.clone(); fins2.rotation.z = Math.PI / 2; rocket.add(fins2);
       const flameMaterial = new T.ShaderMaterial({ transparent:true, depthWrite:false, blending:T.AdditiveBlending, side:T.DoubleSide,
         vertexShader:'varying vec2 vUv; void main(){vUv=uv;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0);}',
         fragmentShader:'varying vec2 vUv; void main(){float fade=pow(sin(vUv.y*3.14159),1.6); float streak=.5+.5*sin(vUv.x*63.0+vUv.y*23.0); gl_FragColor=vec4(mix(vec3(1.0,.14,.015),vec3(1.0,.75,.25),fade),fade*(.16+streak*.21));\n#include <tonemapping_fragment>\n#include <colorspace_fragment>\n}' });
       const flameGeometry = new T.ConeGeometry(.75, 3, 12, 1, true); flameGeometry.rotateX(Math.PI / 2);
-      this.flame = new T.Mesh(flameGeometry, flameMaterial);
-      this.projectile.add(this.flame); this.projectile.visible = false;
+      const flame = new T.Mesh(flameGeometry, flameMaterial); flame.name = 'flame';
+      mesh.add(meteor, ball, rocket, flame);
+      mesh.visible = false; this.scene.add(mesh);
+      this.projectile = mesh;
+      this.projectilePool = [mesh];
+      this.activeShots = [];
+      this.projectileBounds = new T.Box3();
+    }
+    acquireProjectile(weapon, start, dir) {
+      let mesh = this.projectilePool.find(item => !item.visible);
+      if (!mesh) {
+        // Overlapping flights need independent transforms, but share all GPU resources.
+        mesh = this.projectilePool[0].clone();
+        this.projectilePool.push(mesh); this.scene.add(mesh);
+      }
+      for (const child of mesh.children) child.visible = child.name === weapon;
+      const flame = mesh.getObjectByName('flame');
+      flame.visible = weapon !== 'ball';
+      flame.position.set(0, 0, weapon === 'meteor' ? 1.1 : 1.65);
+      flame.scale.set(.4, .4, weapon === 'meteor' ? 4 : 1.6);
+      mesh.position.copy(start);
+      mesh.quaternion.setFromUnitVectors(new T.Vector3(0, 0, -1), dir);
+      mesh.visible = true;
+      return { mesh, flame };
     }
     buildGuide() {
       this.guide = new T.Group(); this.scene.add(this.guide);
@@ -222,13 +244,15 @@
     reset() {
       this.targetHighlight?.update(false); this.targetHighlightPaused = false;
       this.state = 'ready'; this.time = 0; this.watchTime = 0; this.stillTime = 0; this.damageQuietTime = 0; this.score = 0; this.damage = 0; this.shots = 0; this.maxShots = this.freeMode ? Infinity : 4; this.ammoBonus = 0; this.plan = [];
-      this.shotHits=[];this.shotFractures=[];this.shotStartDamage=0;this.lastDamageProgress=0;
-      this.slow = 0; this.hitStop = 0; this.shake = 0; this.effectTime = 0; this.projectile.visible = false; this.shot = null; this.flash.intensity = 0;
+      this.shotHits=[];this.shotFractures=[];this.shotStartDamage=0;this.volleyShots=0;this.lastDamageProgress=0;
+      for (const mesh of this.projectilePool) mesh.visible = false;
+      this.activeShots.length = 0; this.shot = null; this.lastImpactShot = null;
+      this.slow = 0; this.hitStop = 0; this.shake = 0; this.effectTime = 0; this.flash.intensity = 0;
       this.floorBeats=new Map();this.landingBeats=new Map();this.releaseBeats=new Map();this.collapse?.reset();this.structuralFragments?.reset();this.powder?.reset();this.impactFX?.reset();this.onEvent('reset');
       this.fragments.length = 0; this.dust.length = 0;
       this.rubble.length = 0;
       this.rings.forEach(r => { r.mesh.visible = false; r.age = 10; });
-      for (const p of this.parts) { p.node.position.copy(p.rest); p.node.quaternion.copy(p.restQ); p.node.scale.copy(p.restScale); p.node.visible=true; p.node.traverse(n=>{if(n.isMesh)n.visible=true;}); p.phase='intact';p.active=false;p.gone=false;p.direct=false;p.delay=Infinity;p.crumbleProgress=0;p.age=0;p.hitPoint=null;p.crushEnergy=0;p.impactLoad=0;p.blast=false;p.vel.set(0,0,0);p.spin.set(0,0,0); }
+      for (const p of this.parts) { p.node.position.copy(p.rest); p.node.quaternion.copy(p.restQ); p.node.scale.copy(p.restScale); p.node.visible=true; p.node.traverse(n=>{if(n.isMesh)n.visible=true;}); p.phase='intact';p.active=false;p.gone=false;p.direct=false;p.delay=Infinity;p.crumbleProgress=0;p.age=0;p.hitPoint=null;p.crushEnergy=0;p.impactLoad=0;p.blast=false;p.blastShot=null;p.fractureShot=null;p.vel.set(0,0,0);p.spin.set(0,0,0); }
       Object.assign(this.aim,{height:10,angle:0,x:0,z:0});
       this.aimTween=null;
       this.aimFlash=0;this.refreshAimValidity({manual:true});
@@ -241,6 +265,9 @@
       return {min:1,max:Math.max(1,Math.floor((top-.1)*10)/10)};
     }
     get remainingAmmo() { return Math.max(0,this.maxShots-this.shots); }
+    get canAim() {
+      return Boolean(this.loaded && this.state !== 'finished' && (this.freeMode || this.state === 'ready'));
+    }
     refreshAimValidity({manual=false}={}) {
       if(manual){this.aimBlockedByTap=false;this.aimFlash=0;}
       const hit=!this.aimBlockedByTap&&!this.aimTween?this.traceAim().contacts[0]:null;
@@ -343,24 +370,35 @@
       const a = -this.aim.angle * Math.PI / 180, y = this.orbit.yaw;
       return new T.Vector3(-Math.sin(y) * Math.cos(a), Math.sin(a), -Math.cos(y) * Math.cos(a));
     }
-    fire(weapon) {
-      if (!this.loaded || this.state !== 'ready' || this.aimTween || this.remainingAmmo===0 || this.parts.every(p=>p.gone)) return false;
-      const trace=this.traceAim();
-      if(this.aimBlockedByTap||!trace.contacts.length){this.aimValid=false;this.aimFeedback='empty';this.onEvent('emptyAim');return false;}
-      this.shotStartDamage=this.damage;this.shotHits=[];this.shotFractures=[];this.damageQuietTime=0;this.lastDamageProgress=this.parts.reduce((n,p)=>n+p.crumbleProgress,0);
-      this.weapon = weapon; const {dir,start}=trace;
-      this.projectile.position.copy(start); this.projectile.quaternion.setFromUnitVectors(new T.Vector3(0, 0, -1), dir);
-      this.projectileCore.visible = weapon === 'meteor'; this.ballCore.visible = weapon === 'ball'; this.rocket.visible = weapon === 'rocket'; this.flame.visible = weapon !== 'ball';
-      this.projectileCore.scale.setScalar(weapon === 'meteor' ? 1.2 : 0.85);
-      this.projectileCore.material.emissiveIntensity = weapon === 'meteor' ? .4 : 0;
-      this.projectileCore.material.metalness = weapon === 'ball' ? 0.85 : 0.1;
-      this.flame.position.set(0, 0, weapon === 'meteor' ? 1.1 : 1.65); this.flame.scale.set(0.4, 0.4, weapon === 'meteor' ? 4 : 1.6);
-      this.projectile.visible = true; this.guide.visible = false;
-      this.shot = { dir, speed: weapon === 'meteor' ? 62 : weapon === 'rocket' ? 78 : 48, traveled: 0, hit: false, penetrated: new Set(), maxContacts: weapon === 'ball' ? 2 : 1, emit: 0, stopped: false, exitBurst: false };
-      this.shots++; this.state = 'flight'; this.syncTargetHighlight(); this.watchTime = 0; this.stillTime = 0; this.onEvent('launch', { weapon, shots: this.shots }); return true;
+    fire(weapon = this.weapon) {
+      if (!this.canAim || (!this.freeMode && this.aimTween) || this.remainingAmmo === 0) return false;
+      this.aimTween = null;
+      const { start, dir, contacts } = this.traceAim();
+      if (this.aimBlockedByTap || !contacts.length) {
+        this.aimValid = false; this.aimFeedback = 'empty'; this.refreshSupportInsight(null);
+        this.onEvent('emptyAim'); return false;
+      }
+      this.aimValid = true; this.aimFeedback = 'valid'; this.aimFlash = 0;
+      this.refreshSupportInsight(contacts[0].object.userData.part);
+      if (this.state === 'ready') {
+        this.volleyShots = 0; this.shotStartDamage = this.damage;
+        this.shotHits = []; this.shotFractures = [];
+      } else {
+        // Keep a sustained volley moving instead of stacking cinematic impact pauses.
+        this.slow = 0; this.hitStop = 0;
+      }
+      const { mesh, flame } = this.acquireProjectile(weapon, start, dir);
+      const shot = { id: ++this.shots, weapon, dir, mesh, flame, speed: weapon === 'meteor' ? 62 : weapon === 'rocket' ? 78 : 48,
+        traveled: 0, hit: false, penetrated: new Set(), maxContacts: weapon === 'ball' ? 2 : 1, emit: 0, stopped: false, exitBurst: false };
+      this.activeShots.push(shot); this.volleyShots++;
+      this.weapon = weapon; this.shot = shot; this.projectile = mesh;
+      this.watchTime = 0; this.stillTime = 0; this.damageQuietTime = 0;
+      this.lastDamageProgress = this.parts.reduce((sum, part) => sum + part.crumbleProgress, 0);
+      this.state = 'flight'; this.guide.visible = !!this.freeMode; this.syncTargetHighlight();
+      this.onEvent('launch', { weapon, shots: this.shots, shotId: shot.id }); return true;
     }
     pick(x, y) {
-      if (this.state !== 'ready' || !this.model) return false;
+      if (!this.canAim || !this.model) return false;
       this.updateCamera();this.model.updateWorldMatrix(true,true);this.aimTween=null;
       const rect = this.canvas.getBoundingClientRect(); this.ndc.set((x - rect.left) / rect.width * 2 - 1, -(y - rect.top) / rect.height * 2 + 1);
       this.ray.near = 0; this.ray.far = Infinity; this.ray.setFromCamera(this.ndc, this.camera);
@@ -439,39 +477,45 @@
         this.fragments.push({ p: pos, v: dir, r: new T.Euler(Math.random() * 4, Math.random() * 4, 0), spin: 2+Math.random() * 8, scale: glass ? .12 + Math.random() * .3 : .09 + Math.random() * .28, age: 0, glass, color: new T.Color(glass ? (i % 2 ? 0xc0e2ea : 0x47727b) : (i % 2 ? 0x8b887c : 0xb5ac98)) });
       }
     }
-    explode(point, power, scale = 1) {
-      this.flash.position.copy(point); this.flash.intensity = (this.weapon==='ball'?35:180) * power * scale;
+    explode(point, power, scale, shot) {
+      this.flash.position.copy(point); this.flash.intensity = (shot.weapon==='ball'?35:180) * power * scale;
       this.shake = Math.max(this.shake, Math.min(1.8,power*.65*scale));
-      this.impactFX.burst(point, this.shot.dir, this.weapon, scale);
-      this.addDust(point, Math.round(3*power*scale), .7*scale, false, this.shot.dir);
-      this.addFragments(point, Math.round(14*power*scale), power*.8, false, this.shot.dir);
-      this.addFragments(point, Math.round(16*power*scale), power*.75, true, this.shot.dir);
-      this.powder.emit(point,{direction:this.shot.dir,energy:power*scale,count:Math.round(150*power*scale),spread:1.2,falling:false});
+      this.impactFX.burst(point, shot.dir, shot.weapon, scale);
+      this.addDust(point, Math.round(3*power*scale), .7*scale, false, shot.dir);
+      this.addFragments(point, Math.round(14*power*scale), power*.8, false, shot.dir);
+      this.addFragments(point, Math.round(16*power*scale), power*.75, true, shot.dir);
+      this.powder.emit(point,{direction:shot.dir,energy:power*scale,count:Math.round(150*power*scale),spread:1.2,falling:false});
     }
-    impact(point, part) {
-      const shot = this.shot; if (shot.stopped || part.gone || shot.penetrated.has(part.id)) return;
+    impact(point, part, shot = this.shot) {
+      if (!shot || shot.stopped || part.gone || shot.penetrated.has(part.id)) return;
       shot.penetrated.add(part.id);
       const first = !shot.hit; shot.hit = true;
+      this.lastImpactShot = shot;
       this.shotHits.push(part.id);
       // Surface triangles are deduplicated per structural member. Explosive
       // projectiles detonate on entry; the ball can punch through one more member.
       part.fractureCause=first?'impact':'penetration';
-      const power = this.weapon === 'meteor' ? 2.3 : this.weapon === 'rocket' ? 1.6 : 0.9;
+      const power = shot.weapon === 'meteor' ? 2.3 : shot.weapon === 'rocket' ? 1.6 : 0.9;
       part.direct = true; part.hitPoint=point.clone();
-      if(!part.gone)this.fracturePart(part);
-      if (first) { this.slow=1.2; this.hitStop=.045; this.state='watch';shot.entryPoint=point.clone();this.onEvent('impact',{weapon:this.weapon});this.explode(point,power); }
-      else if(!shot.exitBurst && point.distanceTo(shot.entryPoint)>3) { shot.exitBurst=true; this.explode(point,power,.45); this.onEvent('penetration',{weapon:this.weapon}); }
+      this.fracturePart(part, shot);
+      if (first) {
+        if (this.volleyShots === 1) { this.slow=1.2; this.hitStop=.045; }
+        shot.entryPoint=point.clone();
+        this.onEvent('impact',{weapon:shot.weapon,shotId:shot.id});this.explode(point,power,1,shot);
+      }
+      else if(!shot.exitBurst && point.distanceTo(shot.entryPoint)>3) { shot.exitBurst=true; this.explode(point,power,.45,shot); this.onEvent('penetration',{weapon:shot.weapon,shotId:shot.id}); }
       else { this.addFragments(point, 5, power*.6, false, shot.dir); }
       // Only real triangle contact starts damage. The local blast then reaches nearby supports.
-      const plan = first ? P.collapsePlan(this.parts.filter(p=>!p.gone||p===part).map(p=>({...p,center:p.node.position})), [part.id], this.weapon, Math.random, point) : [];
+      const plan = first ? P.collapsePlan(this.parts.filter(p=>!p.gone||p===part).map(p=>({...p,center:p.node.position})), [part.id], shot.weapon, Math.random, point) : [];
       for (const entry of plan) {
-        const p = this.parts.find(p => p.id === entry.id); if (!p || p.active) continue;
-        p.delay = Math.min(p.delay, this.time + entry.delay);p.blast=true;
+        const p = this.parts.find(p => p.id === entry.id); if (!p || p.active || p.gone) continue;
+        const due = this.time + entry.delay;
+        if (due < p.delay) { p.delay = due; p.blast = true; p.blastShot = shot; }
       }
       if (shot.penetrated.size >= shot.maxContacts) {
         shot.stopped = true; shot.stopTime = this.time;
-        this.projectile.position.copy(point);
-        this.projectile.visible = this.weapon === 'ball';
+        shot.mesh.position.copy(point);
+        shot.mesh.visible = shot.weapon === 'ball';
       } else {
         shot.speed *= 0.68;
       }
@@ -484,12 +528,13 @@
       if(fresh){p.vel.set(0,Math.min(0,p.vel.y),0);p.spin.set(0,0,0);}
       if(p.direct)this.fracturePart(p);
     }
-    fracturePart(p) {
+    fracturePart(p, shot = this.lastImpactShot) {
       if(p.gone||this.state==='finished')return;
       this.shotFractures.push({id:p.id,cause:p.fractureCause||(p.direct?'blast':'compression')});
       p.node.updateWorldMatrix(true,true);
-      const direction=this.shot?.dir||new T.Vector3(0,0,-1);
-      this.structuralFragments.release(p,{point:p.hitPoint||p.node.position,direction,velocity:p.vel,angularVelocity:p.spin,direct:p.direct,weapon:this.weapon,cause:p.direct?'blast':'compression',energy:p.crushEnergy||Math.abs(p.vel.y)});
+      p.fractureShot = shot;
+      const direction=shot?.dir||new T.Vector3(0,0,-1), weapon=shot?.weapon||this.weapon;
+      this.structuralFragments.release(p,{point:p.hitPoint||p.node.position,direction,velocity:p.vel,angularVelocity:p.spin,direct:p.direct,weapon,cause:p.direct?'blast':'compression',energy:p.crushEnergy||Math.abs(p.vel.y)});
       p.phase='fragmented';p.gone=true;p.active=true;p.crumbleProgress=1;p.node.visible=false;
       this.targetHighlight?.refreshPart(p);
       const samples=this.structuralFragments.sample(p.id,8);
@@ -498,7 +543,7 @@
         this.powder.emit(point,{direction,energy:p.direct?1.2:.6,count:this.quality==='low'?9:17,spread:.45,falling:!p.direct});
         if(i%3===0)this.addDust(point,1,.55,false,new T.Vector3(point.x,0,point.z).normalize());
       }
-      this.onEvent('fracture',{weapon:this.weapon,floor:p.floor,energy:p.direct?1:.6});
+      this.onEvent('fracture',{weapon,shotId:shot?.id,floor:p.floor,energy:p.direct?1:.6});
       this.score+=100;
       this.renderer.shadowMap.needsUpdate=true;
     }
@@ -543,7 +588,7 @@
       target.direct=false;target.fractureCause='fragment-impact';
       target.hitPoint=new T.Vector3(event.point.x,event.point.y,event.point.z);
       target.crushEnergy=Math.min(5,event.normalSpeed);
-      this.fracturePart(target);
+      this.fracturePart(target,this.parts[event.sourcePartId]?.fractureShot || this.lastImpactShot);
       if (!target.gone) return blocked;
       this.landing({point:target.hitPoint,partId:target.id,floor:target.floor,energy:Math.min(2,event.normalSpeed/5)});
       return {broken:true,spentEnergy:resistance};
@@ -557,7 +602,7 @@
       // The solver supplies the real separating connection. This dust/creak
       // marks the loss of support without scheduling any additional damage.
       this.impactFX.structuralRelease({point:event.point,direction:event.direction,energy});
-      this.onEvent('strain',{weapon:this.weapon,floor:event.floor,kind:event.kind,energy});
+      this.onEvent('strain',{weapon:this.lastImpactShot?.weapon || this.weapon,floor:event.floor,kind:event.kind,energy});
     }
     landing(event) {
       // Granular rubble adds sound/dust, not a second structural damage path.
@@ -573,8 +618,38 @@
       if(this.time-last<.55)return;
       this.floorBeats.set(event.floor,this.time);
       this.shake=Math.max(this.shake,.12+energy*.12);
-      this.onEvent('floorImpact',{weapon:this.weapon,floor:event.floor,energy});
+      this.onEvent('floorImpact',{weapon:this.parts[event.partId]?.fractureShot?.weapon || this.lastImpactShot?.weapon || this.weapon,floor:event.floor,energy});
       this.addFragments(event.point,this.quality==='low'?3:6,.5);
+    }
+    advanceShot(shot, dt) {
+      const { mesh, flame, dir, weapon } = shot;
+      if (shot.stopped) {
+        if (this.time - shot.stopTime > .55) mesh.visible = false;
+        return;
+      }
+      if (dt <= 0 || shot.speed <= 0) return;
+      const start = mesh.position, distance = shot.speed * dt;
+      const end = start.clone().addScaledVector(dir, distance);
+      this.projectileBounds.makeEmpty().expandByPoint(start).expandByPoint(end);
+      const candidates = this.fragmentContact.candidates(this.projectileBounds, { excludeIds: shot.penetrated });
+      this.ray.set(start, dir); this.ray.near = 0; this.ray.far = distance;
+      const contacts = this.ray.intersectObjects(candidates.map(record => record.mesh), false);
+      // impact() moves a stopped mesh to the point of contact. Accumulate the
+      // sweep length from its original origin, including only the travelled part.
+      for (const hit of contacts) {
+        const part = hit.object.userData.part;
+        if (!part || part.gone || shot.penetrated.has(part.id)) continue;
+        this.impact(hit.point, part, shot);
+        if (shot.stopped) { shot.traveled += hit.distance; break; }
+      }
+      if (!shot.stopped) { mesh.position.copy(end); shot.traveled += distance; }
+      shot.emit += dt;
+      if (weapon !== 'ball' && shot.emit > .045) { shot.emit = 0; this.addDust(mesh.position, 1, .35, true); }
+      if (!shot.stopped && (shot.traveled > 115 || end.y < 0)) {
+        mesh.visible = false;
+        if (!shot.hit) this.onEvent('miss', { weapon, shotId: shot.id });
+      }
+      flame.scale.x = flame.scale.y = (weapon === 'meteor' ? 1.05 : .3) * (.85 + Math.random() * .3);
     }
     step(realDt) {
       const elapsedDt=Number.isFinite(realDt)?Math.max(0,realDt):0;
@@ -593,37 +668,23 @@
       this.slow = Math.max(0, this.slow - elapsedDt); this.time += dt; this.effectTime+=clockDt;
       this.flash.intensity *= Math.exp(-clockDt * 14); this.shake *= Math.exp(-clockDt * 7);
       this.impactFX.step(clockDt);
-      const shot = this.shot;
-      if (shot && this.projectile.visible) {
-        if (!shot.stopped) {
-          const old = this.projectile.position.clone(), next = old.clone().addScaledVector(shot.dir, shot.speed * dt), distance = old.distanceTo(next);
-          this.ray.set(old, shot.dir); this.ray.near = 0; this.ray.far = distance;
-          const live=[];
-          for(const p of this.parts) if(!p.gone && !shot.penetrated.has(p.id))
-            p.node.traverseVisible(n=>{if(n.isMesh)live.push(n);});
-          this.scene.updateMatrixWorld(true);
-          const contacts=this.ray.intersectObjects(live,false), encountered=new Set();
-          for(const hit of contacts) {
-            const part=hit.object.userData.part;
-            if(!part || encountered.has(part.id))continue;
-            encountered.add(part.id); this.impact(hit.point,part);
-            if(shot.stopped)break;
+      // Refresh moving targets once, then query just the bounds of each flight segment.
+      this.fragmentContact?.sync();
+      if (this.activeShots.length) {
+        let count = 0, approaching = false;
+        for (const shot of this.activeShots) {
+          this.advanceShot(shot, dt);
+          if (shot.mesh.visible) {
+            this.activeShots[count++] = shot;
+            if (!shot.hit) approaching = true;
           }
-          if (!shot.stopped) this.projectile.position.copy(next);
-          shot.traveled += shot.stopped ? old.distanceTo(this.projectile.position) : distance;
-          shot.emit += dt;
-          if (this.weapon !== 'ball' && shot.emit > 0.045) { shot.emit = 0; this.addDust(this.projectile.position, 1, .35, true); }
-          if (shot.traveled > 115 || next.y < 0) {
-            this.projectile.visible = false;
-            if (!shot.hit) { this.state = 'watch'; this.onEvent('miss'); }
-          }
-        } else if (this.time - shot.stopTime > 0.55) this.projectile.visible = false;
-        this.flame.scale.x = this.flame.scale.y = (this.weapon === 'meteor' ? 1.05 : 0.3) * (0.85 + Math.random() * 0.3);
+        }
+        this.activeShots.length = count;
+        this.state = approaching ? 'flight' : 'watch';
       }
       // Only a local blast has a brief propagation schedule. All upper motion
       // and secondary failure come from live support and physical contact.
-      for(const p of this.parts)if(!p.gone&&p.blast&&this.time>=p.delay){p.direct=true;p.fractureCause='blast';this.fracturePart(p);}
-      this.fragmentContact?.sync();
+      for(const p of this.parts)if(!p.gone&&p.blast&&this.time>=p.delay){p.direct=true;p.fractureCause='blast';this.fracturePart(p,p.blastShot || this.lastImpactShot);}
       if(this.state!=='finished'&&this.collapse.step(dt))this.renderer.shadowMap.needsUpdate=true;
       this.updateDamage();
       this.powder.step(dt);
@@ -649,14 +710,14 @@
         const progress=this.parts.reduce((n,p)=>n+p.crumbleProgress,0);
         this.damageQuietTime=Math.abs(progress-this.lastDamageProgress)>.0001?0:this.damageQuietTime+elapsedDt;this.lastDamageProgress=progress;
         const stats=this.structuralFragments.stats(),limit=Math.max(20,Math.ceil(stats.active*.01));
-        const structuralMotion=this.projectile.visible||this.parts.some(p=>!p.gone&&(p.active||(p.blast&&Number.isFinite(p.delay))));
+        const structuralMotion=this.activeShots.length>0||this.parts.some(p=>!p.gone&&(p.active||(p.blast&&Number.isFinite(p.delay))));
         this.stillTime=structuralMotion||stats.relevantMoving>=limit?0:this.stillTime+elapsedDt;
         // Architectural motion has settled; let the player aim while the small
         // chips finish sliding. Their visual animation continues in ready state.
         if(!structuralMotion&&(this.stillTime>=.35||this.damageQuietTime>=.65)) {
           this.structuralFragments.quietTail();
           const cleared=this.parts.length>0&&this.parts.every(p=>p.gone);
-          const report={score:this.score,damage:this.damage,shotDamage:this.damage-this.shotStartDamage,shots:this.shots,remainingAmmo:this.remainingAmmo,cleared};
+          const report={score:this.score,damage:this.damage,shotDamage:this.damage-this.shotStartDamage,shots:this.shots,volleyShots:this.volleyShots,remainingAmmo:this.remainingAmmo,cleared};
           if(cleared||this.remainingAmmo===0){
             if(cleared&&!this.ammoBonus){this.ammoBonus=Number.isFinite(this.remainingAmmo)?this.remainingAmmo*300:0;this.score+=this.ammoBonus;}
             this.state='finished';this.onEvent('finished',{...report,score:this.score,ammoBonus:this.ammoBonus,canContinue:false});
@@ -682,12 +743,13 @@
       this.camera.updateMatrixWorld(true);
     }
     syncTargetHighlight() {
-      this.targetHighlight?.update(this.state === 'ready' && !this.aimValid && !this.aimTween && !this.targetHighlightPaused);
+      this.targetHighlight?.update(this.canAim && !this.aimValid && !this.aimTween && !this.targetHighlightPaused);
     }
     render() {
       this.syncTargetHighlight();
       this.updateCamera();
       this.renderSupportGuide();
+      this.guide.visible = this.canAim;
       const dir = this.direction(), target = new T.Vector3(this.aim.x, this.aim.height, this.aim.z);
       this.arrow.position.copy(target).addScaledVector(dir, -27); this.arrow.setDirection(dir); this.arrow.setLength(18, 1.5, 0.7);
       this.guideRing.position.copy(target); this.guideRing.quaternion.copy(this.camera.quaternion);

@@ -22,7 +22,7 @@
 
 .aim-assist{display:flex;align-items:center;gap:12px;margin-top:9px}.assist-toggle{min-height:44px;padding:8px 12px;border:1px solid #ffffff26;border-radius:9px;font-size:11px;color:#d3dadd;white-space:nowrap;background:#ffffff05}.assist-toggle[aria-pressed=true]{border-color:#efb87699;background:#efb87613;color:var(--gold)}.aim-assist small{font-size:10px;line-height:1.5;color:var(--muted)}.result-heading{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:12px}.result-heading .eyebrow{margin:0}.result-grade{display:flex;align-items:center;gap:8px;font-size:10px;letter-spacing:1px;color:var(--muted)}.result-grade strong{font-size:30px;line-height:1;font-weight:650;color:#d8e1e5;letter-spacing:0}.result-grade strong[data-grade=S]{color:var(--gold-bright)}.result-grade strong[data-grade=A]{color:#efcf9e}.slider-field output{white-space:nowrap}@media(max-width:390px){.aim-assist{gap:8px}.aim-assist small{font-size:9px}.assist-toggle{padding:8px 10px}.sliders{gap:12px}.slider-field output{font-size:10px}}@media(max-height:540px) and (orientation:landscape){.aim-assist{margin-top:4px;gap:10px}.aim-assist small{font-size:9px}.result-heading{margin-bottom:8px}.result-grade strong{font-size:26px}}
 
-.fire-button[data-aim-empty=true]{background:#343f47;border-color:#6c79844d;color:#a4b0b9;box-shadow:none;opacity:1}.result-card #resultHint{color:#e4c6a0;font-size:13px}
+.result-card #resultHint{color:#e4c6a0;font-size:13px}
 
 .help-steps .weapon-help{margin-top:9px;color:#d5c1aa}
 

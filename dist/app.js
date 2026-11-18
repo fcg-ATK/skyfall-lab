@@ -105,15 +105,14 @@
     if (!engine) return;
     $('score').textContent = engine.score.toLocaleString(); $('damage').textContent = engine.damage + '%';
     $('ammo').textContent = engine.freeMode ? '∞' : engine.remainingAmmo + ' / ' + engine.maxShots;
-    const ready = engine.state === 'ready' && !engine.aimTween, finished = engine.state === 'finished';
-    const emptyTarget = ready && engine.aimValid === false;
-    $('fire').disabled = !engine.loaded || emptyTarget || (!ready && !finished);
-    $('fire').setAttribute('data-aim-empty', String(emptyTarget));
-    $('fire').innerHTML = '<span>' + (ready ? emptyTarget ? '重新瞄准' : '发射' : finished ? '重建' : engine.aimTween ? '调整瞄准' : '观察倒塌') + '</span><svg><use href="#i-arrow"/></svg>';
-    document.querySelectorAll('[data-weapon]').forEach(b => { b.disabled = !ready; });
-    $('height').disabled = $('angle').disabled = !ready;
-    $('autoAimToggle').disabled = engine.state !== 'ready';
-    $('supportGuideToggle').disabled = engine.state !== 'ready';
+    const canAim = engine.canAim;
+    const finished = engine.state === 'finished';
+    $('fire').disabled = !engine.loaded || (!canAim && !finished);
+    $('fire').innerHTML = '<span>' + (finished ? '重建' : '发射') + '</span><svg><use href="#i-arrow"/></svg>';
+    document.querySelectorAll('[data-weapon]').forEach(b => { b.disabled = !canAim; });
+    $('height').disabled = $('angle').disabled = !canAim;
+    $('autoAimToggle').disabled = !canAim;
+    $('supportGuideToggle').disabled = !canAim;
     updateSupportGuide();
     updateDebug();
   }
@@ -140,7 +139,7 @@
   }
   function onEvent(name, data) {
     audio?.play(name, data);
-    if (name === 'launch') { $('status').textContent = '已发射 · 拖动视角观察'; $('aimPanel').hidden = true; $('aimToggle').setAttribute('aria-expanded', 'false'); }
+    if (name === 'launch') { $('status').textContent = '已发射 · 可继续发射'; $('aimPanel').hidden = true; $('aimToggle').setAttribute('aria-expanded', 'false'); }
     if (name === 'impact') $('status').textContent = '命中！观察失稳与连锁坍塌';
     if (name === 'strain') $('status').textContent = data?.kind === 'tipping' ? '支撑断开 · 楼体正在偏转' : '支撑失效 · 楼层正在下坠';
     if (name === 'miss') $('status').textContent = '这次没有命中 · 调低高度或换个方向';
@@ -153,7 +152,8 @@
       $('status').textContent = data?.assisted ? '已辅助瞄准附近楼体 · 可发射' : '已瞄准楼体 · 可发射'; syncAim();
     }
     if (name === 'shotFinished') {
-      $('status').textContent = '本发拆除' + data.shotDamage + '% · 累计' + data.damage + '% · 已用' + data.shots + '发';
+      const volley = data.volleyShots > 1 ? '本轮连续' + data.volleyShots + '发，共拆除' : '本发拆除';
+      $('status').textContent = volley + data.shotDamage + '% · 累计' + data.damage + '% · 已用' + data.shots + '发';
       syncAim(); engine.refreshAimValidity?.();
       if (engine.aimValid === false && !engine.aimTween) $('status').textContent += ' · 暖色楼体仍可打';
     }
@@ -207,8 +207,8 @@
   }
   function refreshAim(manual = false) {
     const wasValid = engine.aimValid;
-    if (engine.state === 'ready') engine.refreshAimValidity?.({ manual });
-    if (engine.state === 'ready' && !engine.aimTween && wasValid !== engine.aimValid) {
+    if (engine.canAim) engine.refreshAimValidity?.({ manual });
+    if (engine.canAim && !engine.aimTween && wasValid !== engine.aimValid) {
       if (engine.aimValid) {
         clearTimeout(toastTimer); $('toast').hidden = true; $('status').textContent = '已瞄准楼体 · 可发射';
       } else $('status').textContent = '重新瞄准 · 暖色楼体仍可打';
@@ -272,11 +272,19 @@
   canvas.addEventListener('wheel', e => { if (modalOpen()) return; e.preventDefault(); cancelAimTween(); engine.orbit.distance = clamp(engine.orbit.distance * Math.exp(e.deltaY * .001), 19, 115); refreshAim(true); }, { passive: false });
   canvas.addEventListener('contextmenu', e => e.preventDefault());
   document.querySelectorAll('[data-weapon]').forEach(button => button.addEventListener('click', () => {
-    if (engine.state !== 'ready') return; weapon = button.dataset.weapon; engine.weapon = weapon;
+    if (!engine.canAim) return;
+    weapon = button.dataset.weapon;
+    engine.weapon = weapon;
     document.querySelectorAll('[data-weapon]').forEach(b => b.setAttribute('aria-pressed', String(b === button)));
     $('status').textContent = weapon === 'meteor' ? '陨石 · 接触后范围冲击，波及相邻楼层' : weapon === 'ball' ? '铁球 · 局部穿透，最多击穿两处结构' : '火箭 · 沿列下切，瞄准中下部承重列';
   }));
-  $('fire').onclick = () => { if (modalOpen() || paused) return; unlockAudio(); if (engine.state === 'finished') reset(); else engine.fire(weapon); };
+  $('fire').onclick = () => {
+    if (modalOpen() || paused) return;
+    unlockAudio();
+    if (engine.state === 'finished') return reset();
+    cancelAimTween();
+    engine.fire(weapon);
+  };
   $('reset').onclick = reset; $('again').onclick = () => { hideModal('result'); reset(); };
   if (debugEnabled) $('debugToggle').onclick = () => {
     $('debugDetails').hidden = !$('debugDetails').hidden;
@@ -290,7 +298,7 @@
   $('autoAimToggle').onclick = () => {
     engine.autoAim = !engine.autoAim;
     if (!engine.autoAim) cancelAimTween();
-    else if (engine.state === 'ready') engine.recoverAim?.();
+    else if (engine.canAim) engine.recoverAim?.();
     syncAutoAim(); syncAim(); refreshAim();
   };
   $('supportGuideToggle').onclick = () => {
@@ -354,7 +362,7 @@
     if (!paused && !modalOpen()) engine.step(dt);
     if (wasAiming && !engine.aimTween) {
       engine.refreshAimValidity?.();
-      if (engine.state === 'ready') {
+      if (engine.canAim) {
         $('status').textContent = engine.aimValid ? '辅助瞄准已就绪 · 可发射' : '重新瞄准 · 暖色楼体仍可打';
         if (engine.aimValid) { clearTimeout(toastTimer); $('toast').hidden = true; }
       }
